@@ -1,0 +1,213 @@
+# =============================================================================
+# Cross-Platform Build Workflow
+# =============================================================================
+#
+# This workflow builds FlowRecap for Windows, macOS, and Linux.
+# It runs on push to tags matching 'v*' and can be triggered manually.
+#
+# Required secrets:
+# - CSC_LINK: Base64-encoded code signing certificate
+# - CSC_KEY_PASSWORD: Certificate password
+# - APPLE_ID: Apple ID for notarization
+# - APPLE_APP_SPECIFIC_PASSWORD: App-specific password for notarization
+# - APPLE_TEAM_ID: Apple Developer Team ID
+#
+
+name: Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      build_mac:
+        description: 'Build macOS'
+        required: true
+        default: true
+        type: boolean
+      build_win:
+        description: 'Build Windows'
+        required: true
+        default: true
+        type: boolean
+      build_linux:
+        description: 'Build Linux'
+        required: true
+        default: true
+        type: boolean
+      skip_signing:
+        description: 'Skip code signing'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ===========================================================================
+  # Build for macOS
+  # ===========================================================================
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    if: ${{ github.event_name == 'push' || github.event.inputs.build_mac == 'true' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run dist:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Code signing (optional - skipped if not set)
+          CSC_LINK: ${{ github.event.inputs.skip_signing == 'true' && '' || secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ github.event.inputs.skip_signing == 'true' && 'false' || 'true' }}
+          # Notarization (optional - skipped if not set)
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: |
+            release/**/*.dmg
+            release/**/*.zip
+          if-no-files-found: error
+
+  # ===========================================================================
+  # Build for Windows
+  # ===========================================================================
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    if: ${{ github.event_name == 'push' || github.event.inputs.build_win == 'true' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run dist:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Code signing (optional - skipped if not set)
+          CSC_LINK: ${{ github.event.inputs.skip_signing == 'true' && '' || secrets.WIN_CSC_LINK || secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD || secrets.CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ github.event.inputs.skip_signing == 'true' && 'false' || 'true' }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            release/**/*.exe
+            release/**/*.zip
+          if-no-files-found: error
+
+  # ===========================================================================
+  # Build for Linux
+  # ===========================================================================
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || github.event.inputs.build_linux == 'true' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm snapcraft
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run dist:linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Skip signing on Linux (not typically needed)
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            release/**/*.AppImage
+            release/**/*.deb
+            release/**/*.rpm
+            release/**/*.snap
+          if-no-files-found: error
+
+  # ===========================================================================
+  # Create Release (only on tag push)
+  # ===========================================================================
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-macos, build-windows, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+            artifacts/**/*.exe
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.rpm
+            artifacts/**/*.snap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

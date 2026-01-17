@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+
+
+# Build outputs
+dist/
+dist-electron/
+release/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# TypeScript
+*.tsbuildinfo
+
+# Test
+coverage/
+
+# Python virtual environments
+python/venv/
+python/venv-3.12/
+python/venv-whisperx/
+python/venv-pyannote/
+__pycache__/
+*.pyc
+
+.automaker/
+
+# Icon generation temporary files
+resources/icons/*.iconset/
+resources/icons/*.svg
+resources/icons/build/*.psd
+resources/icons/build/*.ai
+resources/icons/build/*.sketch
+*.iconset/

@@ -1,0 +1,106 @@
+{
+  "$schema": "./checksums.schema.json",
+  "version": "1.0.0",
+  "generated": "2024-01-01T00:00:00Z",
+  "note": "Update checksums after adding/updating binaries using: npm run generate-binary-checksums",
+  "checksums": {
+    "macos": {
+      "arm64": {
+        "sox": {
+          "filename": "sox",
+          "sha256": "PLACEHOLDER_UPDATE_AFTER_ADDING_BINARY",
+          "version": "",
+          "source": "https://sox.sourceforge.net/",
+          "license": "GPL-2.0"
+        },
+        "ffmpeg": {
+          "filename": "ffmpeg",
+          "sha256": "PLACEHOLDER_UPDATE_AFTER_ADDING_BINARY",
+          "version": "",
+          "source": "https://evermeet.cx/ffmpeg/",
+          "license": "GPL-2.0"
+        },
+        "ffprobe": {
+          "filename": "ffprobe",
+          "sha256": "PLACEHOLDER_UPDATE_AFTER_ADDING_BINARY",
+          "version": "",
+          "source": "https://evermeet.cx/ffmpeg/",
+          "license": "GPL-2.0"
+        }
+      },
+      "x64": {
+        "sox": {
+          "filename": "sox",
+          "sha256": "PLACEHOLDER_UPDATE_AFTER_ADDING_BINARY",
+          "version": "",
+          "source": "https://sox.sourceforge.net/",
+          "license": "GPL-2.0"
+        },
+        "ffmpeg": {
+          "filename": "ffmpeg",
+          "sha256": "PLACEHOLDER_UPDATE_AFTER_ADDING_BINARY",
+          "version": "",
+          "source": "https://evermeet.cx/ffmpeg/",
+          "license": "GPL-2.0"
+        },
+        "ffprobe": {
+          "filename": "ffprobe",
+          "sha256": "PLACEHOLDER_UPDATE_AFTER_ADDING_BINARY",
+          "version": "",
+          "source": "https://evermeet.cx/ffmpeg/",
+          "license": "GPL-2.0"
+        }
+      }
+    },
+    "windows": {
+      "x64": {
+        "sox": {
+          "filename": "sox.exe",
+          "sha256": "PLACEHOLDER_UPDATE_AFTER_ADDING_BINARY",
+          "version": "",
+          "source": "https://sox.sourceforge.net/",
+          "license": "GPL-2.0"
+        },
+        "ffmpeg": {
+          "filename": "ffmpeg.exe",
+          "sha256": "PLACEHOLDER_UPDATE_AFTER_ADDING_BINARY",
+          "version": "",
+          "source": "https://www.gyan.dev/ffmpeg/builds/",
+          "license": "GPL-2.0"
+        },
+        "ffprobe": {
+          "filename": "ffprobe.exe",
+          "sha256": "PLACEHOLDER_UPDATE_AFTER_ADDING_BINARY",
+          "version": "",
+          "source": "https://www.gyan.dev/ffmpeg/builds/",
+          "license": "GPL-2.0"
+        }
+      }
+    },
+    "linux": {
+      "x64": {
+        "sox": {
+          "filename": "sox",
+          "sha256": "PLACEHOLDER_UPDATE_AFTER_ADDING_BINARY",
+          "version": "",
+          "source": "https://sox.sourceforge.net/",
+          "license": "GPL-2.0"
+        },
+        "ffmpeg": {
+          "filename": "ffmpeg",
+          "sha256": "PLACEHOLDER_UPDATE_AFTER_ADDING_BINARY",
+          "version": "",
+          "source": "https://johnvansickle.com/ffmpeg/",
+          "license": "GPL-2.0"
+        },
+        "ffprobe": {
+          "filename": "ffprobe",
+          "sha256": "PLACEHOLDER_UPDATE_AFTER_ADDING_BINARY",
+          "version": "",
+          "source": "https://johnvansickle.com/ffmpeg/",
+          "license": "GPL-2.0"
+        }
+      }
+    }
+  }
+}

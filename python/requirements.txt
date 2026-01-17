@@ -1,0 +1,76 @@
+# Python dependencies for Meeting Notes transcription and diarization
+# Created for use with Python 3.10+ virtual environment
+#
+# Audio Transcription Configuration:
+#   - Optimized for 16kHz audio input
+#   - Returns timestamped segments with confidence scores
+#   - Default model: large-v2
+
+# WhisperX - Fast automatic speech recognition with word-level timestamps
+# https://github.com/m-bain/whisperX
+# Primary backend for transcription
+whisperx>=3.1.1
+
+# faster-whisper - Fallback transcription backend
+# https://github.com/SYSTRAN/faster-whisper
+# Used when WhisperX is unavailable
+faster-whisper>=1.0.0
+
+# pyannote.audio - Speaker diarization toolkit
+# https://github.com/pyannote/pyannote-audio
+pyannote.audio>=3.1.1
+
+# speechbrain - Alternative speaker embedding extraction
+# https://github.com/speechbrain/speechbrain
+# Used as fallback for live diarization when pyannote is unavailable
+speechbrain>=1.0.0
+
+# FFmpeg Python bindings for audio processing
+ffmpeg-python>=0.2.0
+
+# Additional dependencies for audio processing
+# PyTorch 2.8.0 with patched huggingface_hub for compatibility
+# The huggingface_hub library was patched to use weights_only=False in hub_mixin.py
+# to allow pyannote models to load with PyTorch 2.8.0
+torch==2.8.0
+torchaudio==2.8.0
+
+# Numpy for numerical operations
+numpy>=1.24.0
+
+# SoundFile for reading/writing audio files
+soundfile>=0.12.1
+
+# PyDub for simple audio manipulation
+pydub>=0.25.1
+
+# Additional utilities
+tqdm>=4.65.0
+
+# scikit-learn - For clustering algorithms in speaker diarization
+# https://scikit-learn.org/
+# Used for agglomerative and spectral clustering
+scikit-learn>=1.3.0
+
+# omegaconf - Configuration management (required for pyannote model loading)
+omegaconf>=2.3.0
+
+# Hydra - Configuration framework (used by whisperx and pyannote)
+hydra-core>=1.3.0
+
+# Resampy - Audio resampling (used by librosa/whisperx)
+resampy>=0.4.2
+
+# Audioread - Audio file decoding fallback
+audioread>=3.0.0
+
+# torch-audiomentations - Audio augmentation (optional but prevents warnings)
+torch-audiomentations>=0.11.0
+
+# PyTorch ecosystem dependencies (required for bundling with PyInstaller)
+# These are needed by torch's internal operations and export functionality
+tensorboard>=2.14.0  # TensorBoard logging (used by PyTorch training/export)
+expecttest>=0.1.3    # PyTorch testing utilities (required by torch internals)
+onnx>=1.15.0         # ONNX model format support
+onnxruntime>=1.16.0  # ONNX runtime for model inference
+onnxscript>=0.1.0    # ONNX script conversion tools

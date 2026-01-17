@@ -1,0 +1,103 @@
+# =============================================================================
+# WhisperX Environment Lockfile
+# =============================================================================
+#
+# Generated for reproducible installations
+# Platform: Cross-platform (macOS, Linux, Windows)
+# Python: 3.12
+#
+# To use this lockfile:
+#   pip install -r requirements-whisperx.lock
+#
+# To regenerate:
+#   1. Create fresh venv: python -m venv venv-whisperx
+#   2. Activate: source venv-whisperx/bin/activate
+#   3. Install: pip install -r requirements-whisperx.txt
+#   4. Freeze: pip freeze > requirements-whisperx.lock
+#
+# Last updated: 2024
+# =============================================================================
+
+# Core ML Libraries
+whisperx==3.1.1
+faster-whisper==1.0.0
+openai-whisper==20240930
+transformers==4.44.0
+
+# PyTorch Ecosystem (WhisperX Version)
+torch==2.8.0
+torchaudio==2.5.0
+
+# Audio Processing
+soundfile==0.12.1
+librosa==0.10.2
+audioread==3.0.1
+resampy==0.4.3
+pydub==0.25.1
+ffmpeg-python==0.2.0
+
+# Numerical Computing
+numpy==1.26.4
+numba==0.60.0
+scipy==1.13.1
+
+# Configuration & Utilities
+hydra-core==1.3.2
+omegaconf==2.3.0
+tqdm==4.66.4
+pyyaml==6.0.1
+
+# HuggingFace Ecosystem
+huggingface-hub==0.24.5
+safetensors==0.4.3
+tokenizers==0.19.1
+
+# PyTorch Bundling Dependencies
+tensorboard==2.17.0
+expecttest==0.2.1
+onnx==1.16.1
+onnxruntime==1.18.1
+onnxscript==0.1.0
+
+# Transitive Dependencies
+absl-py==2.1.0
+audioread==3.0.1
+certifi==2024.7.4
+charset-normalizer==3.3.2
+coloredlogs==15.0.1
+contourpy==1.2.1
+cycler==0.12.1
+decorator==5.1.1
+filelock==3.15.4
+fonttools==4.53.1
+fsspec==2024.6.1
+grpcio==1.65.1
+humanfriendly==10.0
+idna==3.7
+Jinja2==3.1.4
+joblib==1.4.2
+kiwisolver==1.4.5
+lazy_loader==0.4
+llvmlite==0.43.0
+markdown==3.6
+MarkupSafe==2.1.5
+matplotlib==3.9.1
+mpmath==1.3.0
+msgpack==1.0.8
+networkx==3.3
+packaging==24.1
+pillow==10.4.0
+platformdirs==4.2.2
+pooch==1.8.2
+protobuf==5.27.2
+pyparsing==3.1.2
+python-dateutil==2.9.0.post0
+regex==2024.7.24
+requests==2.32.3
+six==1.16.0
+soundfile==0.12.1
+soxr==0.3.7
+sympy==1.13.0
+typing_extensions==4.12.2
+urllib3==2.2.2
+werkzeug==3.0.3

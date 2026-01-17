@@ -1,0 +1,80 @@
+# =============================================================================
+# Common Shared Utilities Requirements
+# =============================================================================
+#
+# Purpose: Shared dependencies for both WhisperX and Pyannote environments
+# These packages are version-compatible across both PyTorch versions.
+#
+# Usage: Install in BOTH venv-whisperx and venv-pyannote environments
+#   pip install -r requirements-common.txt
+#
+# These utilities provide:
+#   - Model management and caching (huggingface_hub)
+#   - Safe tensor serialization (safetensors)
+#   - Configuration management (omegaconf)
+#   - Visualization (matplotlib)
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Hugging Face Ecosystem
+# -----------------------------------------------------------------------------
+
+# huggingface_hub - Model download and caching with CLI tools
+# https://huggingface.co/docs/huggingface_hub
+# Required for downloading whisperx and pyannote models
+huggingface_hub[cli]>=0.20
+
+# safetensors - Fast and safe tensor serialization
+# https://huggingface.co/docs/safetensors
+# Used for loading model weights efficiently
+safetensors>=0.4
+
+# -----------------------------------------------------------------------------
+# Configuration Management
+# -----------------------------------------------------------------------------
+
+# omegaconf - Flexible configuration system
+# https://omegaconf.readthedocs.io/
+# Required for pyannote and hydra-based configs
+omegaconf>=2.3
+
+# -----------------------------------------------------------------------------
+# Visualization
+# -----------------------------------------------------------------------------
+
+# matplotlib - Plotting and visualization
+# https://matplotlib.org/
+# Used for audio visualization and analysis
+matplotlib>=3.7
+
+# -----------------------------------------------------------------------------
+# Additional Shared Utilities
+# -----------------------------------------------------------------------------
+
+# typing_extensions - Backported type hints
+typing_extensions>=4.5.0
+
+# pyyaml - YAML parser and emitter
+pyyaml>=6.0
+
+# filelock - File locking for concurrent access
+filelock>=3.12
+
+# packaging - Version parsing and comparison
+packaging>=23.0
+
+# requests - HTTP library for API calls
+requests>=2.28.0
+
+# urllib3 - HTTP client library
+urllib3>=2.0.0
+
+# certifi - Root certificates for SSL
+certifi>=2023.0.0
+
+# charset-normalizer - Character encoding detection
+charset-normalizer>=3.0.0
+
+# idna - International domain names support
+idna>=3.4

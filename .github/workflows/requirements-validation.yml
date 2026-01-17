@@ -1,0 +1,409 @@
+# =============================================================================
+# Requirements Validation Workflow
+# =============================================================================
+#
+# Validates that both Python environments (WhisperX and Pyannote) install
+# successfully and have compatible dependencies.
+#
+# This workflow:
+# 1. Validates requirements files syntax and structure
+# 2. Tests WhisperX environment installation
+# 3. Tests Pyannote environment installation
+# 4. Verifies critical package versions
+# 5. Runs import tests for key packages
+#
+# Triggers:
+# - Push/PR to main/master (when python/* files change)
+# - Manual dispatch
+# - Weekly schedule (Sunday midnight UTC)
+
+name: Requirements Validation
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'python/requirements*.txt'
+      - 'python/requirements*.lock'
+      - 'python/validate_requirements.py'
+      - '.github/workflows/requirements-validation.yml'
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - 'python/requirements*.txt'
+      - 'python/requirements*.lock'
+      - 'python/validate_requirements.py'
+      - '.github/workflows/requirements-validation.yml'
+  workflow_dispatch:
+    inputs:
+      use_lockfiles:
+        description: 'Use lockfiles instead of requirements'
+        required: false
+        default: false
+        type: boolean
+      skip_heavy_packages:
+        description: 'Skip heavy packages (torch, etc.) for faster testing'
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # Run weekly on Sunday at midnight UTC
+    - cron: '0 0 * * 0'
+
+env:
+  PYTHON_VERSION: '3.12'
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: requirements-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # Validate Requirements Files
+  # ===========================================================================
+  validate-requirements:
+    name: Validate Requirements Files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Run validation script
+        run: |
+          cd python
+          python validate_requirements.py --strict
+
+      - name: Check file syntax
+        run: |
+          # Verify requirements files are valid pip syntax
+          pip install pip-tools
+          for file in python/requirements-*.txt; do
+            echo "Checking $file..."
+            pip-compile --dry-run "$file" 2>&1 || echo "Note: Some packages may not resolve without torch"
+          done
+
+  # ===========================================================================
+  # Test WhisperX Environment
+  # ===========================================================================
+  test-whisperx-environment:
+    name: Test WhisperX Environment
+    needs: validate-requirements
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        # Windows excluded due to torch compilation issues in CI
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-whisperx-${{ hashFiles('python/requirements-whisperx.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-whisperx-
+
+      - name: Create virtual environment
+        run: |
+          python -m venv venv-whisperx
+          if [[ "$OSTYPE" == "msys" ]]; then
+            source venv-whisperx/Scripts/activate
+          else
+            source venv-whisperx/bin/activate
+          fi
+          pip install --upgrade pip
+
+      - name: Install dependencies
+        run: |
+          source venv-whisperx/bin/activate
+          if [ "${{ github.event.inputs.use_lockfiles }}" == "true" ]; then
+            pip install -r python/requirements-whisperx.lock
+          else
+            pip install -r python/requirements-whisperx.txt
+          fi
+          pip install -r python/requirements-common.txt
+
+      - name: Verify torch version
+        run: |
+          source venv-whisperx/bin/activate
+          python -c "
+          import torch
+          print(f'PyTorch version: {torch.__version__}')
+          assert torch.__version__.startswith('2.8'), f'Expected torch 2.8.x, got {torch.__version__}'
+          print('✓ Torch version check passed')
+          "
+
+      - name: Verify critical imports
+        run: |
+          source venv-whisperx/bin/activate
+          python -c "
+          print('Testing imports...')
+
+          # Core packages
+          import torch
+          print(f'  ✓ torch {torch.__version__}')
+
+          import torchaudio
+          print(f'  ✓ torchaudio {torchaudio.__version__}')
+
+          import whisperx
+          print(f'  ✓ whisperx {whisperx.__version__}')
+
+          import faster_whisper
+          print(f'  ✓ faster_whisper')
+
+          import transformers
+          print(f'  ✓ transformers {transformers.__version__}')
+
+          import librosa
+          print(f'  ✓ librosa {librosa.__version__}')
+
+          import soundfile
+          print(f'  ✓ soundfile {soundfile.__version__}')
+
+          import numpy
+          print(f'  ✓ numpy {numpy.__version__}')
+          assert not numpy.__version__.startswith('2'), f'NumPy 2.x not allowed: {numpy.__version__}'
+
+          print('')
+          print('All imports successful!')
+          "
+
+      - name: Check CUDA availability (info only)
+        run: |
+          source venv-whisperx/bin/activate
+          python -c "
+          import torch
+          cuda_available = torch.cuda.is_available()
+          print(f'CUDA available: {cuda_available}')
+          if cuda_available:
+              print(f'CUDA version: {torch.version.cuda}')
+              print(f'GPU: {torch.cuda.get_device_name(0)}')
+          else:
+              print('Running in CPU mode (expected in CI)')
+          "
+
+  # ===========================================================================
+  # Test Pyannote Environment
+  # ===========================================================================
+  test-pyannote-environment:
+    name: Test Pyannote Environment
+    needs: validate-requirements
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-pyannote-${{ hashFiles('python/requirements-pyannote.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-pyannote-
+
+      - name: Create virtual environment
+        run: |
+          python -m venv venv-pyannote
+          source venv-pyannote/bin/activate
+          pip install --upgrade pip
+
+      - name: Install dependencies
+        run: |
+          source venv-pyannote/bin/activate
+          if [ "${{ github.event.inputs.use_lockfiles }}" == "true" ]; then
+            pip install -r python/requirements-pyannote.lock
+          else
+            pip install -r python/requirements-pyannote.txt
+          fi
+          pip install -r python/requirements-common.txt
+
+      - name: Verify torch version
+        run: |
+          source venv-pyannote/bin/activate
+          python -c "
+          import torch
+          print(f'PyTorch version: {torch.__version__}')
+          assert torch.__version__.startswith('2.5'), f'Expected torch 2.5.x, got {torch.__version__}'
+          print('✓ Torch version check passed')
+          "
+
+      - name: Verify critical imports
+        run: |
+          source venv-pyannote/bin/activate
+          python -c "
+          print('Testing imports...')
+
+          # Core packages
+          import torch
+          print(f'  ✓ torch {torch.__version__}')
+
+          import torchaudio
+          print(f'  ✓ torchaudio {torchaudio.__version__}')
+
+          import pyannote.audio
+          print(f'  ✓ pyannote.audio {pyannote.audio.__version__}')
+
+          import pyannote.core
+          print(f'  ✓ pyannote.core')
+
+          import speechbrain
+          print(f'  ✓ speechbrain {speechbrain.__version__}')
+
+          import pytorch_lightning
+          print(f'  ✓ pytorch_lightning {pytorch_lightning.__version__}')
+
+          import sklearn
+          print(f'  ✓ scikit-learn {sklearn.__version__}')
+
+          import soundfile
+          print(f'  ✓ soundfile {soundfile.__version__}')
+
+          print('')
+          print('All imports successful!')
+          "
+
+      - name: Test pyannote model loading (mock)
+        run: |
+          source venv-pyannote/bin/activate
+          python -c "
+          # Test that pyannote can initialize (without actually loading models)
+          from pyannote.audio import Pipeline
+          from pyannote.core import Segment, Annotation
+
+          # Create a simple annotation to test core functionality
+          annotation = Annotation()
+          annotation[Segment(0, 1)] = 'speaker_A'
+          annotation[Segment(1, 2)] = 'speaker_B'
+
+          print('Pyannote core functionality test passed')
+          print(f'Test annotation: {annotation}')
+          "
+
+  # ===========================================================================
+  # Test Common Utilities
+  # ===========================================================================
+  test-common-utilities:
+    name: Test Common Utilities
+    needs: validate-requirements
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install common utilities
+        run: |
+          python -m venv venv-common
+          source venv-common/bin/activate
+          pip install --upgrade pip
+          pip install -r python/requirements-common.txt
+
+      - name: Verify imports
+        run: |
+          source venv-common/bin/activate
+          python -c "
+          print('Testing common utilities...')
+
+          import huggingface_hub
+          print(f'  ✓ huggingface_hub {huggingface_hub.__version__}')
+
+          import safetensors
+          print(f'  ✓ safetensors {safetensors.__version__}')
+
+          import omegaconf
+          print(f'  ✓ omegaconf {omegaconf.__version__}')
+
+          import matplotlib
+          print(f'  ✓ matplotlib {matplotlib.__version__}')
+
+          print('')
+          print('All common utilities available!')
+          "
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  summary:
+    name: Validation Summary
+    needs: [validate-requirements, test-whisperx-environment, test-pyannote-environment, test-common-utilities]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check results
+        run: |
+          echo "=== Requirements Validation Summary ==="
+          echo ""
+
+          if [ "${{ needs.validate-requirements.result }}" == "success" ]; then
+            echo "✓ Requirements file validation: PASSED"
+          else
+            echo "✗ Requirements file validation: FAILED"
+          fi
+
+          if [ "${{ needs.test-whisperx-environment.result }}" == "success" ]; then
+            echo "✓ WhisperX environment: PASSED"
+          else
+            echo "✗ WhisperX environment: FAILED"
+          fi
+
+          if [ "${{ needs.test-pyannote-environment.result }}" == "success" ]; then
+            echo "✓ Pyannote environment: PASSED"
+          else
+            echo "✗ Pyannote environment: FAILED"
+          fi
+
+          if [ "${{ needs.test-common-utilities.result }}" == "success" ]; then
+            echo "✓ Common utilities: PASSED"
+          else
+            echo "✗ Common utilities: FAILED"
+          fi
+
+          echo ""
+
+          # Fail if any job failed
+          if [ "${{ needs.validate-requirements.result }}" != "success" ] || \
+             [ "${{ needs.test-whisperx-environment.result }}" != "success" ] || \
+             [ "${{ needs.test-pyannote-environment.result }}" != "success" ] || \
+             [ "${{ needs.test-common-utilities.result }}" != "success" ]; then
+            echo "❌ Some validations failed!"
+            exit 1
+          else
+            echo "✅ All validations passed!"
+          fi

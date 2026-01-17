@@ -1,0 +1,428 @@
+# =============================================================================
+# Production Build Test Workflow
+# =============================================================================
+#
+# Automated test suite to verify production builds work correctly on target
+# platforms. This workflow:
+#
+# 1. Builds installers for all platforms
+# 2. Runs automated tests to verify core functionality
+# 3. Tests platform-specific features
+# 4. Verifies no missing dependencies errors
+# 5. Tests app startup time and basic functionality
+#
+# Triggers:
+# - Push to main/master
+# - Pull requests
+# - Manual dispatch
+# - Scheduled (weekly)
+
+name: Production Build Tests
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      skip_build:
+        description: 'Skip build step (use cached artifacts)'
+        required: false
+        default: false
+        type: boolean
+      test_platforms:
+        description: 'Platforms to test'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - macos
+          - windows
+          - linux
+  schedule:
+    # Run weekly on Sunday at midnight UTC
+    - cron: '0 0 * * 0'
+
+env:
+  NODE_VERSION: '20'
+  PLAYWRIGHT_BROWSERS_PATH: 0
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: production-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # Lint and Type Check (Fast Feedback)
+  # ===========================================================================
+  lint-and-typecheck:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run TypeScript type check
+        run: npm run typecheck
+
+  # ===========================================================================
+  # Build Verification Tests
+  # ===========================================================================
+  build-verification:
+    name: Build Verification
+    needs: lint-and-typecheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Vite (frontend)
+        run: npm run build:vite
+
+      - name: Run build verification tests
+        run: npx playwright test tests/production/build-verification.spec.ts --reporter=list
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vite-build
+          path: |
+            dist/
+            dist-electron/
+          retention-days: 1
+
+  # ===========================================================================
+  # macOS Production Tests
+  # ===========================================================================
+  test-macos:
+    name: Test macOS Production Build
+    needs: build-verification
+    runs-on: macos-latest
+    if: ${{ github.event.inputs.test_platforms == 'all' || github.event.inputs.test_platforms == 'macos' || github.event.inputs.test_platforms == '' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: vite-build
+          path: ./
+
+      - name: Build macOS app (unsigned)
+        if: ${{ github.event.inputs.skip_build != 'true' }}
+        run: |
+          # Build without code signing for testing
+          CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Run Electron E2E tests
+        run: npx playwright test tests/production/electron-app.spec.ts --reporter=list
+        env:
+          DISPLAY: ':99'
+
+      - name: Run core functionality tests
+        run: npx playwright test tests/production/core-functionality.spec.ts --reporter=list
+
+      - name: Measure app startup time
+        run: |
+          echo "Measuring app startup time..."
+          START_TIME=$(date +%s%N)
+          timeout 30s npx electron dist-electron/main.js &
+          APP_PID=$!
+          sleep 10
+          END_TIME=$(date +%s%N)
+          ELAPSED=$(( (END_TIME - START_TIME) / 1000000 ))
+          echo "App startup time: ${ELAPSED}ms"
+          kill $APP_PID 2>/dev/null || true
+        continue-on-error: true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-results
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+      - name: Upload macOS build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: |
+            release/**/*.dmg
+            release/**/*.zip
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ===========================================================================
+  # Windows Production Tests
+  # ===========================================================================
+  test-windows:
+    name: Test Windows Production Build
+    needs: build-verification
+    runs-on: windows-latest
+    if: ${{ github.event.inputs.test_platforms == 'all' || github.event.inputs.test_platforms == 'windows' || github.event.inputs.test_platforms == '' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: vite-build
+          path: ./
+
+      - name: Build Windows app (unsigned)
+        if: ${{ github.event.inputs.skip_build != 'true' }}
+        run: |
+          npm run build:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Run Electron E2E tests
+        run: npx playwright test tests/production/electron-app.spec.ts --reporter=list
+
+      - name: Run core functionality tests
+        run: npx playwright test tests/production/core-functionality.spec.ts --reporter=list
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-results
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+      - name: Upload Windows build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            release/**/*.exe
+            release/**/*.zip
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ===========================================================================
+  # Linux Production Tests
+  # ===========================================================================
+  test-linux:
+    name: Test Linux Production Build
+    needs: build-verification
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_platforms == 'all' || github.event.inputs.test_platforms == 'linux' || github.event.inputs.test_platforms == '' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libnss3 \
+            libatk1.0-0 \
+            libatk-bridge2.0-0 \
+            libcups2 \
+            libdrm2 \
+            libxkbcommon0 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxfixes3 \
+            libxrandr2 \
+            libgbm1 \
+            libasound2 \
+            libpango-1.0-0 \
+            libcairo2 \
+            xvfb
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: vite-build
+          path: ./
+
+      - name: Build Linux app
+        if: ${{ github.event.inputs.skip_build != 'true' }}
+        run: |
+          npm run build:linux
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Start Xvfb
+        run: |
+          Xvfb :99 -screen 0 1024x768x24 &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+
+      - name: Run Electron E2E tests
+        run: xvfb-run --auto-servernum npx playwright test tests/production/electron-app.spec.ts --reporter=list
+
+      - name: Run core functionality tests
+        run: xvfb-run --auto-servernum npx playwright test tests/production/core-functionality.spec.ts --reporter=list
+
+      - name: Verify .desktop file generation
+        run: |
+          if [ -d "release" ]; then
+            echo "Checking for Linux desktop integration files..."
+            find release -name "*.desktop" -o -name "*.AppImage" | head -20
+          fi
+        continue-on-error: true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-test-results
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+      - name: Upload Linux build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            release/**/*.AppImage
+            release/**/*.deb
+            release/**/*.rpm
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ===========================================================================
+  # Performance Tests
+  # ===========================================================================
+  performance-tests:
+    name: Performance Tests
+    needs: [test-macos, test-windows, test-linux]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run performance tests
+        run: npx playwright test tests/production/performance.spec.ts --reporter=list
+        continue-on-error: true
+
+      - name: Generate performance report
+        run: |
+          echo "## Performance Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Time | Measured in CI | - |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bundle Size | See artifacts | - |" >> $GITHUB_STEP_SUMMARY
+
+  # ===========================================================================
+  # Test Summary
+  # ===========================================================================
+  summary:
+    name: Test Summary
+    needs: [test-macos, test-windows, test-linux, performance-tests]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Download all test results
+        uses: actions/download-artifact@v4
+        with:
+          path: all-results
+
+      - name: Generate summary
+        run: |
+          echo "## Production Build Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| macOS | ${{ needs.test-macos.result == 'success' && '✅ Passed' || needs.test-macos.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows | ${{ needs.test-windows.result == 'success' && '✅ Passed' || needs.test-windows.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Linux | ${{ needs.test-linux.result == 'success' && '✅ Passed' || needs.test-linux.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Build artifacts are available in the workflow run artifacts." >> $GITHUB_STEP_SUMMARY

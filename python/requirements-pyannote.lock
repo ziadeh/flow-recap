@@ -1,0 +1,125 @@
+# =============================================================================
+# Pyannote Environment Lockfile
+# =============================================================================
+#
+# Generated for reproducible installations
+# Platform: Cross-platform (macOS, Linux, Windows)
+# Python: 3.12
+#
+# To use this lockfile:
+#   pip install -r requirements-pyannote.lock
+#
+# To regenerate:
+#   1. Create fresh venv: python -m venv venv-pyannote
+#   2. Activate: source venv-pyannote/bin/activate
+#   3. Install: pip install -r requirements-pyannote.txt
+#   4. Freeze: pip freeze > requirements-pyannote.lock
+#
+# Last updated: 2024
+# =============================================================================
+
+# Core ML Libraries
+pyannote.audio==3.4.0
+pyannote.core==5.0.0
+pyannote.database==5.1.0
+pyannote.metrics==3.2.1
+pyannote.pipeline==3.0.1
+speechbrain==1.0.0
+
+# PyTorch Ecosystem (Pyannote Version)
+torch==2.5.1
+torchaudio==2.5.1
+pytorch-lightning==2.6.0
+torchmetrics==1.4.0
+
+# Audio Processing
+soundfile==0.12.1
+pydub==0.25.1
+ffmpeg-python==0.2.0
+torch-audiomentations==0.11.1
+asteroid-filterbanks==0.4.0
+
+# Numerical Computing
+numpy==1.26.4
+scipy==1.13.1
+
+# ML Utilities
+scikit-learn==1.5.1
+hyperpyyaml==1.2.2
+sentencepiece==0.2.0
+
+# Configuration & Utilities
+hydra-core==1.3.2
+omegaconf==2.3.0
+tqdm==4.66.4
+pyyaml==6.0.1
+
+# HuggingFace Ecosystem
+huggingface-hub==0.24.5
+safetensors==0.4.3
+tokenizers==0.19.1
+
+# Transitive Dependencies
+absl-py==2.1.0
+aiohttp==3.9.5
+aiosignal==1.3.1
+annotated-types==0.7.0
+antlr4-python3-runtime==4.9.3
+asteroid-filterbanks==0.4.0
+async-timeout==4.0.3
+attrs==23.2.0
+certifi==2024.7.4
+charset-normalizer==3.3.2
+click==8.1.7
+coloredlogs==15.0.1
+contourpy==1.2.1
+cycler==0.12.1
+decorator==5.1.1
+docopt==0.6.2
+einops==0.8.0
+filelock==3.15.4
+fonttools==4.53.1
+frozenlist==1.4.1
+fsspec==2024.6.1
+humanfriendly==10.0
+idna==3.7
+Jinja2==3.1.4
+joblib==1.4.2
+julius==0.2.7
+kiwisolver==1.4.5
+lightning-utilities==0.11.5
+llvmlite==0.43.0
+markdown==3.6
+MarkupSafe==2.1.5
+matplotlib==3.9.1
+mpmath==1.3.0
+multidict==6.0.5
+networkx==3.3
+numba==0.60.0
+packaging==24.1
+pillow==10.4.0
+platformdirs==4.2.2
+primePy==1.3
+protobuf==5.27.2
+pydantic==2.8.2
+pydantic_core==2.20.1
+pyparsing==3.1.2
+python-dateutil==2.9.0.post0
+regex==2024.7.24
+requests==2.32.3
+rich==13.7.1
+ruamel.yaml==0.18.6
+ruamel.yaml.clib==0.2.8
+semver==3.0.2
+shellingham==1.5.4
+six==1.16.0
+sortedcontainers==2.4.0
+sympy==1.13.0
+tabulate==0.9.0
+tensorboard==2.17.0
+threadpoolctl==3.5.0
+typer==0.12.3
+typing_extensions==4.12.2
+urllib3==2.2.2
+werkzeug==3.0.3
+yarl==1.9.4

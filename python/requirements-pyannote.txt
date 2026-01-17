@@ -1,0 +1,121 @@
+# =============================================================================
+# Pyannote Speaker Diarization Environment Requirements
+# =============================================================================
+#
+# Purpose: Speaker identification and diarization (who spoke when)
+# PyTorch Version: 2.5.1 (REQUIRED - Pyannote model compatibility)
+# Python Version: 3.10+ (3.12 recommended)
+#
+# IMPORTANT: This environment uses torch 2.5.1 which is REQUIRED for Pyannote
+# Do NOT mix with WhisperX which requires torch 2.8
+# Using torch 2.8 causes crashes with pyannote models due to weights_only loading.
+#
+# Conflict Resolution:
+#   - torch version differs from whisperx requirements
+#   - pytorch-lightning version pinned for speechbrain compatibility
+#   - Use separate virtual environment to avoid conflicts
+#
+# Installation:
+#   python -m venv venv-pyannote
+#   source venv-pyannote/bin/activate  # or venv-pyannote\Scripts\activate on Windows
+#   pip install -r requirements-pyannote.txt
+#
+# Note: Requires HuggingFace token for model access
+#   export HF_TOKEN=your_token_here
+#   # Accept model terms at https://huggingface.co/pyannote/speaker-diarization-3.1
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core Diarization Libraries
+# -----------------------------------------------------------------------------
+
+# pyannote.audio - State-of-the-art speaker diarization toolkit
+# https://github.com/pyannote/pyannote-audio
+# Primary backend for speaker identification
+pyannote.audio==3.4.0
+
+# speechbrain - Alternative speaker embedding extraction
+# https://github.com/speechbrain/speechbrain
+# Used as fallback for speaker embeddings
+speechbrain>=1.0
+
+# -----------------------------------------------------------------------------
+# PyTorch Ecosystem (Pyannote Version)
+# -----------------------------------------------------------------------------
+
+# PyTorch 2.5.1 - REQUIRED VERSION for Pyannote compatibility
+# Pyannote models require this specific version due to:
+#   - Model weight loading compatibility (weights_only parameter)
+#   - Tensor serialization format
+#   - CUDA memory management
+torch==2.5.1
+
+# torchaudio - PyTorch audio processing
+# Must match PyTorch version exactly
+torchaudio==2.5.1
+
+# pytorch-lightning - Training framework used by pyannote
+# Version pinned for speechbrain compatibility
+pytorch-lightning==2.6.0
+
+# torchmetrics - Metrics computation for PyTorch
+torchmetrics>=1.0
+
+# -----------------------------------------------------------------------------
+# Pyannote Ecosystem
+# -----------------------------------------------------------------------------
+
+# pyannote.core - Core data structures for pyannote
+pyannote.core>=5.0
+
+# pyannote.database - Database management for pyannote
+pyannote.database>=5.1
+
+# pyannote.metrics - Evaluation metrics (DER, etc.)
+pyannote.metrics>=3.2
+
+# pyannote.pipeline - Pipeline infrastructure
+pyannote.pipeline>=3.0
+
+# -----------------------------------------------------------------------------
+# Audio Processing
+# -----------------------------------------------------------------------------
+
+# asteroid-filterbanks - Audio filterbanks for speech processing
+# Required for certain pyannote preprocessing
+asteroid-filterbanks>=0.4
+
+# torch-audiomentations - Audio augmentation (prevents warnings)
+torch-audiomentations>=0.11.0
+
+# -----------------------------------------------------------------------------
+# Common Utilities (reference requirements-common.txt)
+# -----------------------------------------------------------------------------
+# For shared utilities, also install:
+#   pip install -r requirements-common.txt
+
+# FFmpeg Python bindings for audio processing
+ffmpeg-python>=0.2.0
+
+# Numpy for numerical operations
+numpy>=1.24.0
+
+# SoundFile for reading/writing audio files
+soundfile>=0.12.1
+
+# PyDub for simple audio manipulation
+pydub>=0.25.1
+
+# Progress bar utility
+tqdm>=4.65.0
+
+# scikit-learn - For clustering algorithms in speaker diarization
+# Used for agglomerative and spectral clustering
+scikit-learn>=1.3.0
+
+# omegaconf - Configuration management (required for pyannote model loading)
+omegaconf>=2.3.0
+
+# Hydra - Configuration framework (used by pyannote)
+hydra-core>=1.3.0

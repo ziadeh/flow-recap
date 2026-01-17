@@ -1,0 +1,129 @@
+# =============================================================================
+# WhisperX Transcription Environment Requirements
+# =============================================================================
+#
+# Purpose: Speech-to-text transcription with word-level timestamps
+# PyTorch Version: 2.8.0 (REQUIRED - WhisperX optimized for latest torch)
+# Python Version: 3.10+ (3.12 recommended)
+#
+# IMPORTANT: This environment uses torch 2.8.0 which is REQUIRED for WhisperX
+# Do NOT mix with pyannote.audio which requires torch 2.5.1
+# Use venv-whisperx for transcription operations only.
+#
+# Conflict Resolution:
+#   - torch version differs from pyannote requirements
+#   - numpy<2.0 ensures compatibility with all dependencies
+#   - Use separate virtual environment to avoid conflicts
+#
+# Installation:
+#   python -m venv venv-whisperx
+#   source venv-whisperx/bin/activate  # or venv-whisperx\Scripts\activate on Windows
+#   pip install -r requirements-whisperx.txt
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core Transcription Libraries
+# -----------------------------------------------------------------------------
+
+# WhisperX - Fast automatic speech recognition with word-level timestamps
+# https://github.com/m-bain/whisperX
+# Primary backend for transcription with VAD-based chunking
+whisperx>=3.0
+
+# faster-whisper - High-performance CTranslate2 backend for Whisper
+# https://github.com/SYSTRAN/faster-whisper
+# Provides 4x speed improvement over original whisper
+faster-whisper>=1.0
+
+# openai-whisper - Original OpenAI Whisper implementation
+# https://github.com/openai/whisper
+# Fallback transcription backend
+openai-whisper>=20240930
+
+# transformers - Hugging Face model hub integration
+# https://huggingface.co/docs/transformers
+# Required for model loading and processing
+transformers>=4.40
+
+# -----------------------------------------------------------------------------
+# PyTorch Ecosystem (WhisperX Version)
+# -----------------------------------------------------------------------------
+
+# PyTorch 2.8.0 - REQUIRED VERSION for WhisperX compatibility
+# WhisperX requires the latest torch for optimal performance
+# Features: improved attention mechanisms, better memory efficiency
+torch==2.8.0
+
+# torchaudio - PyTorch audio processing
+# Must match PyTorch version exactly (2.8.0 to match torch)
+torchaudio==2.8.0
+
+# -----------------------------------------------------------------------------
+# Audio Processing Libraries
+# -----------------------------------------------------------------------------
+
+# SoundFile - Read and write sound files
+# https://pysoundfile.readthedocs.io/
+soundfile>=0.12
+
+# librosa - Audio and music analysis
+# https://librosa.org/
+# Required for audio feature extraction
+librosa>=0.10
+
+# -----------------------------------------------------------------------------
+# Numerical Computing
+# -----------------------------------------------------------------------------
+
+# NumPy - Numerical computing foundation
+# IMPORTANT: Version <2.0 required for compatibility with audio libraries
+# NumPy 2.0+ has breaking API changes that affect whisperx/librosa
+numpy<2.0
+
+# Numba - JIT compilation for numerical functions
+# Required for optimized audio processing in librosa
+numba>=0.60
+
+# -----------------------------------------------------------------------------
+# Common Utilities (reference requirements-common.txt)
+# -----------------------------------------------------------------------------
+# For shared utilities, also install:
+#   pip install -r requirements-common.txt
+
+# FFmpeg Python bindings for audio processing
+ffmpeg-python>=0.2.0
+
+# PyDub for simple audio manipulation
+pydub>=0.25.1
+
+# Progress bar utility
+tqdm>=4.65.0
+
+# Hydra - Configuration framework (used by whisperx)
+hydra-core>=1.3.0
+
+# Resampy - Audio resampling (used by librosa/whisperx)
+resampy>=0.4.2
+
+# Audioread - Audio file decoding fallback
+audioread>=3.0.0
+
+# -----------------------------------------------------------------------------
+# PyTorch Ecosystem Dependencies (for bundling with PyInstaller)
+# -----------------------------------------------------------------------------
+
+# TensorBoard logging (used by PyTorch training/export)
+tensorboard>=2.14.0
+
+# PyTorch testing utilities (required by torch internals)
+expecttest>=0.1.3
+
+# ONNX model format support
+onnx>=1.15.0
+
+# ONNX runtime for model inference
+onnxruntime>=1.16.0
+
+# ONNX script conversion tools
+onnxscript>=0.1.0
