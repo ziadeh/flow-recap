@@ -1561,6 +1561,7 @@ export function InsightsTab({
   const [refreshKey, setRefreshKey] = useState(0)
   const [isFetching, setIsFetching] = useState(false)
   const [hasFetched, setHasFetched] = useState(false)
+  const [lastGenerationMode, setLastGenerationMode] = useState<'strict' | 'balanced' | 'loose' | null>(null)
 
   // Recording state for detecting active recordings
   const recordingStatus = useRecordingStore((state) => state.status)
@@ -1682,7 +1683,7 @@ export function InsightsTab({
   }, [isActive, meetingId, hasTranscripts, totalInsights, isRecordingThisMeeting])
 
   // Handle regeneration
-  const handleRegenerate = async (mode: 'replace' | 'merge', section?: 'all' | 'decisions' | 'action_items' | 'key_points' | 'topics') => {
+  const handleRegenerate = async (mode: 'replace' | 'merge', section?: 'all' | 'decisions' | 'action_items' | 'key_points' | 'topics', customNoteMode?: 'strict' | 'balanced' | 'loose') => {
     setIsRegenerating(true)
     setError(null)
     setSuccessMessage(null)
@@ -1712,14 +1713,26 @@ export function InsightsTab({
         await api.deleteExisting(meetingId)
       }
 
-      // Extract new insights
-      const result = await api.extract(meetingId)
+      // Get the note generation mode from settings if not provided
+      let noteGenerationMode: 'strict' | 'balanced' | 'loose' = customNoteMode || 'strict'
+      if (!customNoteMode) {
+        const savedMode = await window.electronAPI.db.settings.get<string>('ai.noteGenerationMode')
+        if (savedMode && (savedMode === 'strict' || savedMode === 'balanced' || savedMode === 'loose')) {
+          noteGenerationMode = savedMode
+        }
+      }
+
+      // Extract new insights with the note generation mode
+      const result = await api.extract(meetingId, { noteGenerationMode })
 
       if (!result.success) {
         setError(result.error || 'Failed to regenerate insights')
         setIsRegenerating(false)
         return
       }
+
+      // Save the mode that was used for this generation
+      setLastGenerationMode(noteGenerationMode)
 
       // Show success message
       const decisionsCount = result.extraction?.decisions?.length || 0
@@ -1741,6 +1754,7 @@ export function InsightsTab({
         topicsCount,
         keyPointsCount,
         processingTimeMs: result.metadata?.processingTimeMs,
+        noteGenerationMode,
       })
 
       // Notify parent to refetch data
@@ -1864,6 +1878,34 @@ export function InsightsTab({
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-green-600 flex-shrink-0" />
             <p className="text-sm text-green-700">{successMessage}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Note Generation Mode Indicator */}
+      {lastGenerationMode && hasExistingInsights && (
+        <div className="flex items-center justify-between p-3 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg">
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-purple-600 dark:text-purple-400 flex-shrink-0" />
+            <span className="text-sm text-purple-700 dark:text-purple-300">
+              Generated with: <span className="font-medium capitalize">{lastGenerationMode}</span> filtering
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleRegenerate('replace', 'all', lastGenerationMode === 'strict' ? 'balanced' : lastGenerationMode === 'balanced' ? 'loose' : 'strict')}
+              disabled={isRegenerating}
+              className="px-3 py-1.5 text-xs font-medium bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/70 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isRegenerating ? (
+                <>
+                  <Loader2 className="w-3 h-3 inline mr-1 animate-spin" />
+                  Regenerating...
+                </>
+              ) : (
+                `Try ${lastGenerationMode === 'strict' ? 'Balanced' : lastGenerationMode === 'balanced' ? 'Loose' : 'Strict'} mode`
+              )}
+            </button>
           </div>
         </div>
       )}

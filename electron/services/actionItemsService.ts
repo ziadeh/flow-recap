@@ -18,6 +18,8 @@ import type { ChatMessage } from './lm-studio-client'
 import { transcriptService } from './transcriptService'
 import { meetingNoteService } from './meetingNoteService'
 import { taskService } from './taskService'
+import { actionItemValidationService } from './actionItemValidationService'
+import type { ValidationResult } from './actionItemValidationService'
 import type { MeetingNote, Task, Transcript, TaskPriority } from '../../src/types/database'
 
 // ============================================================================
@@ -38,6 +40,10 @@ export interface ActionItemsExtractionConfig {
   createNotes?: boolean
   /** Maximum transcript segments to include (for token efficiency) */
   maxTranscriptSegments?: number
+  /** Whether to enable strict validation (default: true) */
+  enableValidation?: boolean
+  /** Whether to use LLM for validation edge cases (default: false) */
+  useLLMValidation?: boolean
 }
 
 /**
@@ -56,6 +62,8 @@ export interface ExtractedActionItem {
   context: string | null
   /** Speaker who mentioned/assigned this action item */
   speaker: string | null
+  /** Validation result (populated after validation) */
+  validationResult?: ValidationResult
 }
 
 /**
@@ -96,6 +104,12 @@ export interface ActionItemsExtractionResult {
     llmResponseTimeMs?: number
     /** Number of action items extracted */
     actionItemCount: number
+    /** Number of items that passed validation */
+    validatedActionItemCount?: number
+    /** Number of items moved to tasks due to validation failure */
+    movedToTasksCount?: number
+    /** Validation processing time */
+    validationTimeMs?: number
   }
 }
 
@@ -108,7 +122,9 @@ const DEFAULT_CONFIG: ActionItemsExtractionConfig = {
   temperature: 0.2, // Lower temperature for more consistent extraction
   createTasks: true,
   createNotes: true,
-  maxTranscriptSegments: 200
+  maxTranscriptSegments: 200,
+  enableValidation: true,
+  useLLMValidation: false
 }
 
 // ============================================================================
@@ -508,6 +524,39 @@ class ActionItemsService {
     const extractedItems = parsed.data.actionItems
     let createdNotes: MeetingNote[] = []
     let createdTasks: Task[] = []
+    let validatedActionItemCount = 0
+    let movedToTasksCount = 0
+    let validationTimeMs = 0
+
+    // Validate action items if enabled
+    if (mergedConfig.enableValidation && extractedItems.length > 0) {
+      const validationStartTime = Date.now()
+
+      for (const item of extractedItems) {
+        const validationResult = await actionItemValidationService.validate(
+          {
+            task: item.task,
+            assignee: item.assignee,
+            deadline: item.dueDate,
+            priority: item.priority,
+            context: item.context,
+            speaker: item.speaker
+          },
+          null, // No subject context in this service (subject-aware service handles that)
+          mergedConfig.useLLMValidation
+        )
+
+        item.validationResult = validationResult
+
+        if (validationResult.isValid) {
+          validatedActionItemCount++
+        } else {
+          movedToTasksCount++
+        }
+      }
+
+      validationTimeMs = Date.now() - validationStartTime
+    }
 
     // Create meeting notes from action items if enabled
     if (mergedConfig.createNotes && extractedItems.length > 0) {
@@ -529,41 +578,65 @@ class ActionItemsService {
         transcriptSegmentCount: limitedTranscripts.length,
         transcriptCharacterCount,
         llmResponseTimeMs,
-        actionItemCount: extractedItems.length
+        actionItemCount: extractedItems.length,
+        validatedActionItemCount: mergedConfig.enableValidation ? validatedActionItemCount : undefined,
+        movedToTasksCount: mergedConfig.enableValidation ? movedToTasksCount : undefined,
+        validationTimeMs: mergedConfig.enableValidation ? validationTimeMs : undefined
       }
     }
   }
 
   /**
    * Create meeting notes from extracted action items
+   * Items that fail validation are marked as 'custom' notes instead of 'action_item'
    */
   private createNotesFromActionItems(meetingId: string, items: ExtractedActionItem[]): MeetingNote[] {
     const createdNotes: MeetingNote[] = []
 
     for (const item of items) {
+      // Check if item passed validation
+      const isValidActionItem = !item.validationResult || item.validationResult.isValid
+
       // Build note content with all relevant information
-      let content = item.task
+      let content = ''
 
-      if (item.assignee) {
-        content = `[${item.assignee}] ${content}`
-      }
+      // Use formatted action item format for valid items
+      if (isValidActionItem && item.assignee) {
+        content = `[${item.assignee}] ${item.task}`
+        if (item.dueDate) {
+          content += ` — Due: ${item.dueDate}`
+        }
+      } else {
+        // Standard format for invalid items
+        content = item.task
 
-      if (item.priority && item.priority !== 'medium') {
-        content = `[${item.priority.toUpperCase()}] ${content}`
-      }
+        if (item.assignee) {
+          content = `[${item.assignee}] ${content}`
+        }
 
-      if (item.dueDate) {
-        content = `${content} (Due: ${item.dueDate})`
+        if (item.priority && item.priority !== 'medium') {
+          content = `[${item.priority.toUpperCase()}] ${content}`
+        }
+
+        if (item.dueDate) {
+          content = `${content} (Due: ${item.dueDate})`
+        }
       }
 
       if (item.context) {
         content = `${content}\n\nContext: ${item.context}`
       }
 
+      // Add validation failure note
+      if (item.validationResult && !item.validationResult.isValid) {
+        const failureNote = actionItemValidationService.formatValidationFailure(item.validationResult)
+        content = `${content}\n\n${failureNote}`
+      }
+
       const note = meetingNoteService.create({
         meeting_id: meetingId,
         content,
-        note_type: 'action_item',
+        note_type: isValidActionItem ? 'action_item' : 'custom',
         is_ai_generated: true
       })
       createdNotes.push(note)
@@ -574,6 +647,7 @@ class ActionItemsService {
 
   /**
    * Create tasks from extracted action items
+   * Items that fail validation get validation metadata added to description
    */
   private createTasksFromActionItems(meetingId: string, items: ExtractedActionItem[]): Task[] {
     const createdTasks: Task[] = []
@@ -597,6 +671,14 @@ class ActionItemsService {
         description = description
           ? `${description}\n\nOriginal due date mentioned: ${item.dueDate}`
           : `Original due date mentioned: ${item.dueDate}`
+      }
+
+      // Add validation metadata if item failed validation
+      if (item.validationResult && !item.validationResult.isValid) {
+        const failureNote = actionItemValidationService.formatValidationFailure(item.validationResult)
+        description = description
+          ? `${description}\n\n${failureNote}`
+          : failureNote
       }
 
       const task = taskService.create({

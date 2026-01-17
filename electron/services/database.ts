@@ -90,7 +90,7 @@ try {
 const DB_NAME = 'meeting-notes.db'
 // Legacy database name (for migration purposes)
 const LEGACY_DB_NAME = 'meeting-notes.db'
-const CURRENT_SCHEMA_VERSION = 11
+const CURRENT_SCHEMA_VERSION = 13
 
 // ============================================================================
 // Schema Migrations
@@ -877,6 +877,247 @@ const migrations: Migration[] = [
       BEGIN
         UPDATE environment_status SET updated_at = datetime('now') WHERE id = NEW.id;
       END;
+    `
+  },
+  {
+    version: 12,
+    name: 'add_subject_aware_note_generation',
+    up: `
+      -- ========================================
+      -- Meeting Subject table
+      -- ========================================
+      -- Stores subject/topic detection results for meetings
+      -- Tracks both draft (during recording) and locked (final) subjects
+      CREATE TABLE IF NOT EXISTS meeting_subjects (
+        id TEXT PRIMARY KEY NOT NULL,
+        meeting_id TEXT NOT NULL UNIQUE,
+        title TEXT,
+        goal TEXT,
+        scope_keywords TEXT,  -- JSON array of keywords
+        status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'locked')),
+        strictness_mode TEXT NOT NULL DEFAULT 'strict' CHECK(strictness_mode IN ('strict', 'balanced', 'loose')),
+        locked_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+      );
+
+      -- Indexes for meeting_subjects
+      CREATE INDEX IF NOT EXISTS idx_meeting_subjects_meeting_id ON meeting_subjects(meeting_id);
+      CREATE INDEX IF NOT EXISTS idx_meeting_subjects_status ON meeting_subjects(status);
+
+      -- ========================================
+      -- Subject History table (for debugging/improvement)
+      -- ========================================
+      -- Tracks changes to subject detection over time
+      CREATE TABLE IF NOT EXISTS subject_history (
+        id TEXT PRIMARY KEY NOT NULL,
+        meeting_id TEXT NOT NULL,
+        title TEXT,
+        goal TEXT,
+        scope_keywords TEXT,  -- JSON array
+        detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+        chunk_window_start_ms INTEGER,
+        chunk_window_end_ms INTEGER,
+        FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+      );
+
+      -- Index for subject_history
+      CREATE INDEX IF NOT EXISTS idx_subject_history_meeting_id ON subject_history(meeting_id);
+      CREATE INDEX IF NOT EXISTS idx_subject_history_detected_at ON subject_history(detected_at);
+
+      -- ========================================
+      -- Chunked Transcript table (for developer storage)
+      -- ========================================
+      -- Stores transcript chunks with timing windows for debugging
+      CREATE TABLE IF NOT EXISTS transcript_chunks (
+        id TEXT PRIMARY KEY NOT NULL,
+        meeting_id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        window_start_ms INTEGER NOT NULL,
+        window_end_ms INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        speaker_ids TEXT,  -- JSON array
+        segment_ids TEXT,  -- JSON array of source transcript IDs
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+      );
+
+      -- Indexes for transcript_chunks
+      CREATE INDEX IF NOT EXISTS idx_transcript_chunks_meeting_id ON transcript_chunks(meeting_id);
+      CREATE INDEX IF NOT EXISTS idx_transcript_chunks_window ON transcript_chunks(meeting_id, window_start_ms, window_end_ms);
+
+      -- ========================================
+      -- Relevance Labels table
+      -- ========================================
+      -- Stores relevance scores for each chunk
+      CREATE TABLE IF NOT EXISTS relevance_labels (
+        id TEXT PRIMARY KEY NOT NULL,
+        meeting_id TEXT NOT NULL,
+        chunk_id TEXT NOT NULL,
+        relevance_type TEXT NOT NULL CHECK(relevance_type IN ('in_scope_important', 'in_scope_minor', 'out_of_scope', 'unclear')),
+        score REAL NOT NULL DEFAULT 0.0,
+        reasoning TEXT,
+        is_final INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE,
+        FOREIGN KEY (chunk_id) REFERENCES transcript_chunks(id) ON DELETE CASCADE
+      );
+
+      -- Indexes for relevance_labels
+      CREATE INDEX IF NOT EXISTS idx_relevance_labels_meeting_id ON relevance_labels(meeting_id);
+      CREATE INDEX IF NOT EXISTS idx_relevance_labels_chunk_id ON relevance_labels(chunk_id);
+      CREATE INDEX IF NOT EXISTS idx_relevance_labels_type ON relevance_labels(relevance_type);
+
+      -- ========================================
+      -- Note Candidates table
+      -- ========================================
+      -- Stores extracted note candidates with relevance before final filtering
+      CREATE TABLE IF NOT EXISTS note_candidates (
+        id TEXT PRIMARY KEY NOT NULL,
+        meeting_id TEXT NOT NULL,
+        chunk_id TEXT,
+        note_type TEXT NOT NULL CHECK(note_type IN ('key_point', 'decision', 'action_item', 'task', 'other_note')),
+        content TEXT NOT NULL,
+        speaker_id TEXT,
+        assignee TEXT,
+        deadline TEXT,
+        priority TEXT CHECK(priority IN ('high', 'medium', 'low') OR priority IS NULL),
+        relevance_type TEXT CHECK(relevance_type IN ('in_scope_important', 'in_scope_minor', 'out_of_scope', 'unclear') OR relevance_type IS NULL),
+        relevance_score REAL,
+        is_duplicate INTEGER NOT NULL DEFAULT 0,
+        is_final INTEGER NOT NULL DEFAULT 0,
+        included_in_output INTEGER NOT NULL DEFAULT 0,
+        exclusion_reason TEXT,
+        source_segment_ids TEXT,  -- JSON array
+        extracted_at TEXT NOT NULL DEFAULT (datetime('now')),
+        finalized_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE,
+        FOREIGN KEY (chunk_id) REFERENCES transcript_chunks(id) ON DELETE SET NULL,
+        FOREIGN KEY (speaker_id) REFERENCES speakers(id) ON DELETE SET NULL
+      );
+
+      -- Indexes for note_candidates
+      CREATE INDEX IF NOT EXISTS idx_note_candidates_meeting_id ON note_candidates(meeting_id);
+      CREATE INDEX IF NOT EXISTS idx_note_candidates_chunk_id ON note_candidates(chunk_id);
+      CREATE INDEX IF NOT EXISTS idx_note_candidates_type ON note_candidates(note_type);
+      CREATE INDEX IF NOT EXISTS idx_note_candidates_relevance ON note_candidates(relevance_type);
+      CREATE INDEX IF NOT EXISTS idx_note_candidates_included ON note_candidates(included_in_output);
+
+      -- ========================================
+      -- Subject-Aware Session State table
+      -- ========================================
+      -- Stores session state for recovery and debugging
+      CREATE TABLE IF NOT EXISTS subject_aware_sessions (
+        id TEXT PRIMARY KEY NOT NULL,
+        meeting_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'paused', 'finalizing', 'completed', 'error')),
+        config TEXT NOT NULL,  -- JSON config
+        chunks_processed INTEGER NOT NULL DEFAULT 0,
+        candidates_extracted INTEGER NOT NULL DEFAULT 0,
+        notes_finalized INTEGER NOT NULL DEFAULT 0,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        finalized_at TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+      );
+
+      -- Index for subject_aware_sessions
+      CREATE INDEX IF NOT EXISTS idx_subject_aware_sessions_meeting_id ON subject_aware_sessions(meeting_id);
+      CREATE INDEX IF NOT EXISTS idx_subject_aware_sessions_status ON subject_aware_sessions(status);
+
+      -- ========================================
+      -- Triggers for updated_at timestamps
+      -- ========================================
+      CREATE TRIGGER IF NOT EXISTS update_meeting_subjects_timestamp
+      AFTER UPDATE ON meeting_subjects
+      BEGIN
+        UPDATE meeting_subjects SET updated_at = datetime('now') WHERE id = NEW.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS update_relevance_labels_timestamp
+      AFTER UPDATE ON relevance_labels
+      BEGIN
+        UPDATE relevance_labels SET updated_at = datetime('now') WHERE id = NEW.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS update_note_candidates_timestamp
+      AFTER UPDATE ON note_candidates
+      BEGIN
+        UPDATE note_candidates SET updated_at = datetime('now') WHERE id = NEW.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS update_subject_aware_sessions_timestamp
+      AFTER UPDATE ON subject_aware_sessions
+      BEGIN
+        UPDATE subject_aware_sessions SET updated_at = datetime('now') WHERE id = NEW.id;
+      END;
+    `,
+    down: `
+      DROP TRIGGER IF EXISTS update_subject_aware_sessions_timestamp;
+      DROP TRIGGER IF EXISTS update_note_candidates_timestamp;
+      DROP TRIGGER IF EXISTS update_relevance_labels_timestamp;
+      DROP TRIGGER IF EXISTS update_meeting_subjects_timestamp;
+      DROP INDEX IF EXISTS idx_subject_aware_sessions_status;
+      DROP INDEX IF EXISTS idx_subject_aware_sessions_meeting_id;
+      DROP TABLE IF EXISTS subject_aware_sessions;
+      DROP INDEX IF EXISTS idx_note_candidates_included;
+      DROP INDEX IF EXISTS idx_note_candidates_relevance;
+      DROP INDEX IF EXISTS idx_note_candidates_type;
+      DROP INDEX IF EXISTS idx_note_candidates_chunk_id;
+      DROP INDEX IF EXISTS idx_note_candidates_meeting_id;
+      DROP TABLE IF EXISTS note_candidates;
+      DROP INDEX IF EXISTS idx_relevance_labels_type;
+      DROP INDEX IF EXISTS idx_relevance_labels_chunk_id;
+      DROP INDEX IF EXISTS idx_relevance_labels_meeting_id;
+      DROP TABLE IF EXISTS relevance_labels;
+      DROP INDEX IF EXISTS idx_transcript_chunks_window;
+      DROP INDEX IF EXISTS idx_transcript_chunks_meeting_id;
+      DROP TABLE IF EXISTS transcript_chunks;
+      DROP INDEX IF EXISTS idx_subject_history_detected_at;
+      DROP INDEX IF EXISTS idx_subject_history_meeting_id;
+      DROP TABLE IF EXISTS subject_history;
+      DROP INDEX IF EXISTS idx_meeting_subjects_status;
+      DROP INDEX IF EXISTS idx_meeting_subjects_meeting_id;
+      DROP TABLE IF EXISTS meeting_subjects;
+    `
+  },
+  {
+    version: 13,
+    name: 'add_subject_confidence_tracking',
+    up: `
+      -- ========================================
+      -- Add confidence_score to meeting_subjects
+      -- ========================================
+      -- Tracks real-time confidence in subject detection during recording
+      -- Score ranges from 0.0 (unstable) to 1.0 (stable/locked)
+      ALTER TABLE meeting_subjects ADD COLUMN confidence_score REAL NOT NULL DEFAULT 0.0;
+
+      -- ========================================
+      -- Add confidence_score to subject_history
+      -- ========================================
+      -- Stores confidence score for each subject detection event
+      -- Enables debugging and analysis of subject evolution over time
+      ALTER TABLE subject_history ADD COLUMN confidence_score REAL NOT NULL DEFAULT 0.0;
+
+      -- Create index for querying subjects by confidence level
+      CREATE INDEX IF NOT EXISTS idx_meeting_subjects_confidence ON meeting_subjects(confidence_score);
+
+      -- Create index for analyzing confidence trends over time
+      CREATE INDEX IF NOT EXISTS idx_subject_history_confidence ON subject_history(meeting_id, confidence_score);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_subject_history_confidence;
+      DROP INDEX IF EXISTS idx_meeting_subjects_confidence;
+
+      -- Note: SQLite doesn't support DROP COLUMN directly
+      -- For rollback, we would need to recreate the tables without these columns
+      -- This is usually acceptable as migrations are meant to go forward
     `
   }
 ]

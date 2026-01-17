@@ -18,6 +18,7 @@ import { resetTranscriptCorrectionStatements as resetTranscriptCorrection } from
 import { resetConfidenceScoringStatements as resetConfidenceScoring } from './confidenceScoringService'
 import { resetMeetingDeletionStatements as resetMeetingDeletion } from './meetingDeletionService'
 import { resetSpeakerNameDetectionStatements as resetSpeakerNameDetection } from './speakerNameDetectionService'
+import { resetSubjectAwareNoteGenerationStatements as resetSubjectAwareNoteGeneration } from './subjectAwareNoteGenerationService'
 
 // Core database service
 export { getDatabaseService, DatabaseService, CURRENT_SCHEMA_VERSION, migrations } from './database'
@@ -492,6 +493,31 @@ export type {
   LiveNoteSessionState
 } from './liveNoteGenerationService'
 
+// Subject-Aware Note Generation Service (intelligent two-pass note generation)
+export {
+  subjectAwareNoteGenerationService,
+  resetSubjectAwareNoteGenerationStatements
+} from './subjectAwareNoteGenerationService'
+export type {
+  StrictnessMode,
+  RelevanceType,
+  SubjectStatus,
+  SessionStatus as SubjectAwareSessionStatus,
+  CandidateNoteType,
+  MeetingSubject,
+  SubjectHistory,
+  TranscriptChunk,
+  RelevanceLabel,
+  NoteCandidate,
+  TranscriptSegmentInput as SubjectAwareTranscriptInput,
+  SubjectAwareConfig,
+  SubjectAwareSessionState,
+  SubjectDetectionResult,
+  RelevanceScoringResult,
+  CandidateExtractionResult,
+  FinalizationResult
+} from './subjectAwareNoteGenerationService'
+
 // Live Insights Persistence Service (automatic persistence of live notes)
 export { getLiveInsightsPersistenceService } from './liveInsightsPersistenceService'
 export type {
@@ -720,6 +746,7 @@ export function resetAllStatements(): void {
   resetConfidenceScoring()
   resetMeetingDeletion()
   resetSpeakerNameDetection()
+  resetSubjectAwareNoteGeneration()
 }
 
 /**

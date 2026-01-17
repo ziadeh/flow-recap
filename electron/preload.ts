@@ -2953,6 +2953,250 @@ const liveNotesAPI = {
 }
 
 // ============================================================================
+// Subject-Aware Note Generation API (intelligent two-pass note generation)
+// ============================================================================
+
+// Types for subject-aware note generation
+interface SubjectAwareConfig {
+  minChunkWindowMs?: number
+  maxChunkWindowMs?: number
+  batchIntervalMs?: number
+  minSegmentsPerChunk?: number
+  maxSegmentsPerChunk?: number
+  strictnessMode?: 'strict' | 'balanced' | 'loose'
+  minScopeKeywords?: number
+  maxScopeKeywords?: number
+  maxTokens?: number
+  temperature?: number
+  storeDebugData?: boolean
+}
+
+interface SubjectAwareTranscriptSegment {
+  id: string
+  content: string
+  speaker?: string | null
+  speakerId?: string | null
+  startTimeMs: number
+  endTimeMs: number
+}
+
+interface MeetingSubject {
+  id: string
+  meetingId: string
+  title: string | null
+  goal: string | null
+  scopeKeywords: string[]
+  status: 'draft' | 'locked'
+  strictnessMode: 'strict' | 'balanced' | 'loose'
+  lockedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+interface NoteCandidate {
+  id: string
+  meetingId: string
+  chunkId: string | null
+  noteType: 'key_point' | 'decision' | 'action_item' | 'task' | 'other_note'
+  content: string
+  speakerId: string | null
+  assignee: string | null
+  deadline: string | null
+  priority: 'high' | 'medium' | 'low' | null
+  relevanceType: 'in_scope_important' | 'in_scope_minor' | 'out_of_scope' | 'unclear' | null
+  relevanceScore: number | null
+  isDuplicate: boolean
+  isFinal: boolean
+  includedInOutput: boolean
+  exclusionReason: string | null
+  sourceSegmentIds: string[]
+  extractedAt: string
+  finalizedAt: string | null
+}
+
+const subjectAwareNotesAPI = {
+  // Check if LLM is available for subject-aware note generation
+  checkAvailability: (): Promise<{
+    available: boolean
+    error?: string
+    modelInfo?: string
+  }> => ipcRenderer.invoke('subjectAwareNotes:checkAvailability'),
+
+  // Start a subject-aware note generation session
+  startSession: (
+    meetingId: string,
+    config?: Partial<SubjectAwareConfig>
+  ): Promise<{ success: boolean; error?: string; llmProvider?: string }> =>
+    ipcRenderer.invoke('subjectAwareNotes:startSession', meetingId, config),
+
+  // Stop the subject-aware note generation session (triggers finalization)
+  stopSession: (): Promise<{
+    success: boolean
+    error?: string
+    notesCreated: number
+    tasksCreated: number
+    candidatesFiltered: number
+    processingTimeMs: number
+  }> => ipcRenderer.invoke('subjectAwareNotes:stopSession'),
+
+  // Pause subject-aware note generation
+  pauseSession: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('subjectAwareNotes:pauseSession'),
+
+  // Resume subject-aware note generation
+  resumeSession: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('subjectAwareNotes:resumeSession'),
+
+  // Add transcript segments for processing
+  addSegments: (segments: SubjectAwareTranscriptSegment[]): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('subjectAwareNotes:addSegments', segments),
+
+  // Get current session state
+  getSessionState: (): Promise<{
+    isActive: boolean
+    meetingId: string | null
+    status: string
+    chunksProcessed: number
+    candidatesExtracted: number
+    currentSubject: MeetingSubject | null
+    error?: string
+  }> => ipcRenderer.invoke('subjectAwareNotes:getSessionState'),
+
+  // Get current configuration
+  getConfig: (): Promise<SubjectAwareConfig | null> =>
+    ipcRenderer.invoke('subjectAwareNotes:getConfig'),
+
+  // Update configuration
+  updateConfig: (
+    config: Partial<SubjectAwareConfig>
+  ): Promise<{ success: boolean; config?: SubjectAwareConfig; error?: string }> =>
+    ipcRenderer.invoke('subjectAwareNotes:updateConfig', config),
+
+  // Subscribe to status updates
+  onStatus: (callback: (data: { status: string; timestamp: number }) => void): (() => void) => {
+    const handler = (_event: unknown, data: { status: string; timestamp: number }) => {
+      callback(data)
+    }
+    ipcRenderer.on('subjectAwareNotes:status', handler)
+    return () => {
+      ipcRenderer.removeListener('subjectAwareNotes:status', handler)
+    }
+  },
+
+  // Subscribe to subject updates
+  onSubject: (callback: (subject: MeetingSubject) => void): (() => void) => {
+    const handler = (_event: unknown, subject: MeetingSubject) => {
+      callback(subject)
+    }
+    ipcRenderer.on('subjectAwareNotes:subject', handler)
+    return () => {
+      ipcRenderer.removeListener('subjectAwareNotes:subject', handler)
+    }
+  },
+
+  // Subscribe to new candidates
+  onCandidates: (callback: (candidates: NoteCandidate[]) => void): (() => void) => {
+    const handler = (_event: unknown, candidates: NoteCandidate[]) => {
+      callback(candidates)
+    }
+    ipcRenderer.on('subjectAwareNotes:candidates', handler)
+    return () => {
+      ipcRenderer.removeListener('subjectAwareNotes:candidates', handler)
+    }
+  },
+
+  // Subscribe to confidence updates
+  onConfidence: (callback: (confidence: {
+    score: number
+    status: 'unstable' | 'emerging' | 'likely_stable' | 'stable'
+    message: string
+    detectionCount: number
+    lastUpdated: number
+  }) => void): (() => void) => {
+    const handler = (_event: unknown, confidence: {
+      score: number
+      status: 'unstable' | 'emerging' | 'likely_stable' | 'stable'
+      message: string
+      detectionCount: number
+      lastUpdated: number
+    }) => {
+      callback(confidence)
+    }
+    ipcRenderer.on('subjectAwareNotes:confidence', handler)
+    return () => {
+      ipcRenderer.removeListener('subjectAwareNotes:confidence', handler)
+    }
+  },
+
+  // Subscribe to batch state updates
+  onBatchState: (callback: (state: {
+    isProcessing: boolean
+    lastBatchStartTime: number | null
+    lastBatchCompleteTime: number | null
+    pendingSegmentCount: number
+    chunksProcessed: number
+    timestamp: number
+  }) => void): (() => void) => {
+    const handler = (_event: unknown, state: {
+      isProcessing: boolean
+      lastBatchStartTime: number | null
+      lastBatchCompleteTime: number | null
+      pendingSegmentCount: number
+      chunksProcessed: number
+      timestamp: number
+    }) => {
+      callback(state)
+    }
+    ipcRenderer.on('subjectAwareNotes:batchState', handler)
+    return () => {
+      ipcRenderer.removeListener('subjectAwareNotes:batchState', handler)
+    }
+  },
+
+  // Subscribe to errors
+  onError: (callback: (error: {
+    code: string
+    message: string
+    timestamp: number
+    recoverable: boolean
+  }) => void): (() => void) => {
+    const handler = (_event: unknown, error: {
+      code: string
+      message: string
+      timestamp: number
+      recoverable: boolean
+    }) => {
+      callback(error)
+    }
+    ipcRenderer.on('subjectAwareNotes:error', handler)
+    return () => {
+      ipcRenderer.removeListener('subjectAwareNotes:error', handler)
+    }
+  },
+
+  // Subscribe to notes persisted events
+  onPersisted: (callback: (data: {
+    meetingId: string
+    notesCount: number
+    tasksCount: number
+    timestamp: number
+  }) => void): (() => void) => {
+    const handler = (_event: unknown, data: {
+      meetingId: string
+      notesCount: number
+      tasksCount: number
+      timestamp: number
+    }) => {
+      callback(data)
+    }
+    ipcRenderer.on('subjectAwareNotes:persisted', handler)
+    return () => {
+      ipcRenderer.removeListener('subjectAwareNotes:persisted', handler)
+    }
+  }
+}
+
+// ============================================================================
 // Live Insights Persistence API (automatic persistence of live notes to database)
 // ============================================================================
 
@@ -4328,6 +4572,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Live Notes API (real-time meeting notes during recording)
   liveNotes: liveNotesAPI,
 
+  // Subject-Aware Note Generation API (intelligent two-pass note generation)
+  subjectAwareNotes: subjectAwareNotesAPI,
+
   // Live Insights Persistence API (automatic persistence of live notes to database)
   liveInsights: liveInsightsAPI,
 
@@ -4397,6 +4644,7 @@ declare global {
       llmProvider: typeof llmProviderAPI
       llmHealthCheck: typeof llmHealthCheckAPI
       liveNotes: typeof liveNotesAPI
+      subjectAwareNotes: typeof subjectAwareNotesAPI
       liveInsights: typeof liveInsightsAPI
       transcriptCorrection: typeof transcriptCorrectionAPI
       confidenceScoring: typeof confidenceScoringAPI

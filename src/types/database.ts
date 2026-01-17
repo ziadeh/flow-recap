@@ -287,6 +287,26 @@ export type SettingCategory =
   | 'notifications'
   | 'storage'
 
+// ============================================================================
+// Note Generation Filtering Mode Types
+// ============================================================================
+
+/**
+ * Strictness mode for note generation filtering
+ * Controls how aggressively out-of-scope content is filtered
+ */
+export type NoteGenerationMode = 'strict' | 'balanced' | 'loose'
+
+/**
+ * Configuration for note generation filtering modes
+ */
+export interface NoteGenerationModeConfig {
+  /** The selected filtering mode */
+  mode: NoteGenerationMode
+  /** Description of the current mode */
+  description: string
+}
+
 export interface CreateSettingInput {
   key: string
   value: unknown  // Will be JSON-encoded

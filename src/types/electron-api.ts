@@ -6,6 +6,14 @@
 // Sentiment types
 export type SentimentType = 'positive' | 'negative' | 'neutral' | 'mixed'
 
+// Note Generation Mode types
+export type NoteGenerationMode = 'strict' | 'balanced' | 'loose'
+
+export interface NoteGenerationModeConfig {
+  mode: NoteGenerationMode
+  description: string
+}
+
 // Extracted Decision from decisionsAndTopics API
 export interface ExtractedDecision {
   content: string
@@ -68,6 +76,7 @@ export interface ExtractionProcessResult {
     transcriptCharacterCount: number
     llmResponseTimeMs?: number
     meetingDurationMs?: number
+    noteGenerationMode?: NoteGenerationMode
   }
 }
 

@@ -127,6 +127,7 @@ import {
   startHealthChecks,
   liveNoteGenerationService,
   getLiveInsightsPersistenceService,
+  subjectAwareNoteGenerationService,
   transcriptCorrectionService,
   confidenceScoringService,
   meetingDeletionService,
@@ -152,6 +153,8 @@ import type {
   DecisionsAndTopicsConfig,
   LiveNoteGenerationConfig,
   LiveNoteTranscriptInput,
+  SubjectAwareConfig,
+  SubjectAwareTranscriptInput,
   ExportFormat,
   ExportConfig,
   ScreenCaptureKitConfig,
@@ -634,6 +637,9 @@ app.whenReady().then(async () => {
   // Set up IPC handlers for tiered validation (progressive startup validation)
   setupTieredValidationIPC()
 
+  // Set up IPC handlers for model manager (download/manage ML models)
+  setupModelManagerIPC()
+
   // Set up IPC handlers for Python environment setup
   setupPythonSetupIPC()
 
@@ -651,6 +657,9 @@ app.whenReady().then(async () => {
 
   // Set up IPC handlers for live notes generation
   setupLiveNotesIPC()
+
+  // Set up IPC handlers for subject-aware note generation
+  setupSubjectAwareNotesIPC()
 
   // Set up IPC handlers for transcript correction
   setupTranscriptCorrectionIPC()
@@ -4411,6 +4420,143 @@ function setupLiveNotesIPC() {
         notesCreated: 0,
         error: err instanceof Error ? err.message : String(err)
       }
+    }
+  })
+}
+
+// ============================================================================
+// Subject-Aware Note Generation IPC Handlers
+// ============================================================================
+
+function setupSubjectAwareNotesIPC() {
+  // Check if LLM is available for subject-aware note generation
+  ipcMain.handle('subjectAwareNotes:checkAvailability', async () => {
+    console.log('[Main] subjectAwareNotes:checkAvailability')
+    try {
+      return await subjectAwareNoteGenerationService.checkAvailability()
+    } catch (err) {
+      console.error('[Main] Check subject-aware notes availability error:', err)
+      return {
+        available: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Start a subject-aware note generation session
+  ipcMain.handle('subjectAwareNotes:startSession', async (
+    _event,
+    meetingId: string,
+    config?: Partial<SubjectAwareConfig>
+  ) => {
+    console.log('[Main] subjectAwareNotes:startSession', meetingId)
+    try {
+      return await subjectAwareNoteGenerationService.startSession(meetingId, config)
+    } catch (err) {
+      console.error('[Main] Start subject-aware notes session error:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Stop the subject-aware note generation session (triggers finalization)
+  ipcMain.handle('subjectAwareNotes:stopSession', async () => {
+    console.log('[Main] subjectAwareNotes:stopSession')
+    try {
+      return await subjectAwareNoteGenerationService.stopSession()
+    } catch (err) {
+      console.error('[Main] Stop subject-aware notes session error:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+        notesCreated: 0,
+        tasksCreated: 0,
+        candidatesFiltered: 0,
+        processingTimeMs: 0
+      }
+    }
+  })
+
+  // Pause subject-aware note generation
+  ipcMain.handle('subjectAwareNotes:pauseSession', async () => {
+    console.log('[Main] subjectAwareNotes:pauseSession')
+    try {
+      subjectAwareNoteGenerationService.pauseSession()
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Pause subject-aware notes session error:', err)
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Resume subject-aware note generation
+  ipcMain.handle('subjectAwareNotes:resumeSession', async () => {
+    console.log('[Main] subjectAwareNotes:resumeSession')
+    try {
+      subjectAwareNoteGenerationService.resumeSession()
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Resume subject-aware notes session error:', err)
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Add transcript segments for processing
+  ipcMain.handle('subjectAwareNotes:addSegments', async (
+    _event,
+    segments: SubjectAwareTranscriptInput[]
+  ) => {
+    // Minimize logging for performance (segments come frequently)
+    try {
+      subjectAwareNoteGenerationService.addSegments(segments)
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Add subject-aware notes segments error:', err)
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Get current session state
+  ipcMain.handle('subjectAwareNotes:getSessionState', async () => {
+    console.log('[Main] subjectAwareNotes:getSessionState')
+    try {
+      return subjectAwareNoteGenerationService.getSessionState()
+    } catch (err) {
+      console.error('[Main] Get subject-aware notes session state error:', err)
+      return {
+        isActive: false,
+        meetingId: null,
+        status: 'error',
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Get current configuration
+  ipcMain.handle('subjectAwareNotes:getConfig', async () => {
+    console.log('[Main] subjectAwareNotes:getConfig')
+    try {
+      return subjectAwareNoteGenerationService.getConfig()
+    } catch (err) {
+      console.error('[Main] Get subject-aware notes config error:', err)
+      return null
+    }
+  })
+
+  // Update configuration
+  ipcMain.handle('subjectAwareNotes:updateConfig', async (
+    _event,
+    config: Partial<SubjectAwareConfig>
+  ) => {
+    console.log('[Main] subjectAwareNotes:updateConfig', config)
+    try {
+      subjectAwareNoteGenerationService.updateConfig(config)
+      return { success: true, config: subjectAwareNoteGenerationService.getConfig() }
+    } catch (err) {
+      console.error('[Main] Update subject-aware notes config error:', err)
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
 }

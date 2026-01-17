@@ -41,6 +41,8 @@ export interface DecisionsAndTopicsConfig {
   includeDuration?: boolean
   /** Maximum transcript segments to include (for token efficiency) */
   maxTranscriptSegments?: number
+  /** Note generation filtering mode */
+  noteGenerationMode?: 'strict' | 'balanced' | 'loose'
 }
 
 /**
@@ -200,6 +202,50 @@ SENTIMENT CLASSIFICATION:
 
 OUTPUT FORMAT:
 You MUST respond with valid JSON only, no additional text or markdown formatting.`
+
+/**
+ * Get mode-specific filtering instructions
+ */
+function getModeFilteringInstructions(mode: 'strict' | 'balanced' | 'loose'): string {
+  switch (mode) {
+    case 'strict':
+      return `
+FILTERING MODE: STRICT (Default)
+- Extract ONLY highly important, in-scope content
+- IGNORE minor details, small talk, and unclear/ambiguous content
+- Action items must have clear title, assignee (or "TBD" if explicitly mentioned), and realistic due date
+- Only include decisions that are explicit and final
+- Keep key points to critical insights only (importance >= 4)
+- Minimal context in "Other Notes" - only include absolutely essential background information
+- Be very selective - quality over quantity`
+
+    case 'balanced':
+      return `
+FILTERING MODE: BALANCED
+- Include important AND moderately relevant content
+- Extract both critical insights AND useful supporting details
+- Action items can have some "TBD" fields if context suggests they will be determined later
+- Include decisions that are strongly implied, not just explicit ones
+- Include key points with importance >= 3
+- Moderate context in "Other Notes" - include helpful background and context
+- Balance comprehensiveness with relevance`
+
+    case 'loose':
+      return `
+FILTERING MODE: LOOSE
+- Include all potentially useful content
+- Extract important content, minor details, AND useful contextual information
+- Action items can be more flexible with "TBD" fields
+- Include decisions that are discussed even if not fully finalized
+- Include key points with importance >= 2
+- Extensive context in "Other Notes" - include all useful background, context, and tangential discussions
+- Err on the side of inclusion - capture the full picture of the meeting
+- Only filter out definitely out-of-scope or irrelevant content (social chat, technical difficulties, etc.)`
+
+    default:
+      return getModeFilteringInstructions('strict')
+  }
+}
 
 /**
  * User prompt template for extraction
@@ -716,6 +762,14 @@ class DecisionsAndTopicsService {
     const { formatted, durationMs, speakers } = formatTranscriptsForLLM(limitedTranscripts)
     const transcriptCharacterCount = formatted.length
 
+    // Get the note generation mode (default to 'strict' if not provided)
+    const noteGenerationMode = mergedConfig.noteGenerationMode || 'strict'
+
+    // Build the system prompt with mode-specific filtering instructions
+    const systemPromptWithMode = `${EXTRACTION_SYSTEM_PROMPT}
+
+${getModeFilteringInstructions(noteGenerationMode)}`
+
     // Build the user prompt
     const userPrompt = EXTRACTION_USER_PROMPT_TEMPLATE
       .replace('{TRANSCRIPT}', formatted)
@@ -725,7 +779,7 @@ class DecisionsAndTopicsService {
 
     // Build messages for LLM
     const messages: ChatMessage[] = [
-      { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
+      { role: 'system', content: systemPromptWithMode },
       { role: 'user', content: userPrompt }
     ]
 
@@ -747,7 +801,8 @@ class DecisionsAndTopicsService {
           transcriptSegmentCount: limitedTranscripts.length,
           transcriptCharacterCount,
           llmResponseTimeMs,
-          meetingDurationMs: durationMs
+          meetingDurationMs: durationMs,
+          noteGenerationMode
         }
       }
     }
@@ -763,7 +818,8 @@ class DecisionsAndTopicsService {
           transcriptSegmentCount: limitedTranscripts.length,
           transcriptCharacterCount,
           llmResponseTimeMs,
-          meetingDurationMs: durationMs
+          meetingDurationMs: durationMs,
+          noteGenerationMode
         }
       }
     }
@@ -779,7 +835,8 @@ class DecisionsAndTopicsService {
           transcriptSegmentCount: limitedTranscripts.length,
           transcriptCharacterCount,
           llmResponseTimeMs,
-          meetingDurationMs: durationMs
+          meetingDurationMs: durationMs,
+          noteGenerationMode
         }
       }
     }
@@ -796,7 +853,8 @@ class DecisionsAndTopicsService {
         transcriptSegmentCount: limitedTranscripts.length,
         transcriptCharacterCount,
         llmResponseTimeMs,
-        meetingDurationMs: durationMs
+        meetingDurationMs: durationMs,
+        noteGenerationMode
       }
     }
   }

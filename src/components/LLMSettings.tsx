@@ -20,7 +20,8 @@ import {
   ExternalLink,
   Terminal,
   Zap,
-  Info
+  Info,
+  Filter
 } from 'lucide-react'
 
 // ============================================================================
@@ -53,6 +54,9 @@ type CursorModelType =
   | 'gpt-5.1-codex-max-high'
   | 'grok'
 
+// Note Generation Mode types
+type NoteGenerationMode = 'strict' | 'balanced' | 'loose'
+
 interface ClaudeModelOption {
   id: ClaudeModelType
   name: string
@@ -65,11 +69,40 @@ interface CursorModelOption {
   isRecommended?: boolean
 }
 
+interface NoteGenerationModeOption {
+  id: NoteGenerationMode
+  name: string
+  description: string
+  example: string
+}
+
 // Claude model options
 const CLAUDE_MODELS: ClaudeModelOption[] = [
   { id: 'haiku', name: 'Haiku' },
   { id: 'sonnet', name: 'Sonnet' },
   { id: 'opus', name: 'Opus' }
+]
+
+// Note Generation Mode options
+const NOTE_GENERATION_MODES: NoteGenerationModeOption[] = [
+  {
+    id: 'strict',
+    name: 'Strict (Default)',
+    description: 'Only highly important, in-scope content. Strictest action item criteria, minimal context.',
+    example: 'Best for focused meetings where only critical decisions and tasks matter.'
+  },
+  {
+    id: 'balanced',
+    name: 'Balanced',
+    description: 'Important + moderately relevant content. Relaxed action item criteria, moderate context.',
+    example: 'Good for general meetings where both key points and supporting details are useful.'
+  },
+  {
+    id: 'loose',
+    name: 'Loose',
+    description: 'All potentially useful content. Flexible action item criteria, extensive context.',
+    example: 'Ideal for exploratory discussions where capturing the full picture is important.'
+  }
 ]
 
 // Cursor model options
@@ -105,6 +138,7 @@ interface LLMSettingsState {
   model: string
   claudeModel?: ClaudeModelType
   cursorModel?: CursorModelType
+  noteGenerationMode?: NoteGenerationMode
 }
 
 interface ConnectionStatus {
@@ -165,6 +199,7 @@ export function LLMSettings({ className, onSettingsChange }: LLMSettingsProps) {
   const [model, setModel] = useState<string>('default')
   const [claudeModel, setClaudeModel] = useState<ClaudeModelType>('opus')
   const [cursorModel, setCursorModel] = useState<CursorModelType>('auto')
+  const [noteGenerationMode, setNoteGenerationMode] = useState<NoteGenerationMode>('strict')
 
   // UI state
   const [isLoading, setIsLoading] = useState(true)
@@ -230,12 +265,13 @@ export function LLMSettings({ className, onSettingsChange }: LLMSettingsProps) {
     const loadSettings = async () => {
       setIsLoading(true)
       try {
-        const [savedUrl, savedProvider, savedModel, savedClaudeModel, savedCursorModel] = await Promise.all([
+        const [savedUrl, savedProvider, savedModel, savedClaudeModel, savedCursorModel, savedNoteMode] = await Promise.all([
           window.electronAPI.db.settings.get<string>('ai.lmStudioUrl'),
           window.electronAPI.db.settings.get<string>('ai.provider'),
           window.electronAPI.db.settings.get<string>('ai.model'),
           window.electronAPI.db.settings.get<string>('ai.claudeModel'),
-          window.electronAPI.db.settings.get<string>('ai.cursorModel')
+          window.electronAPI.db.settings.get<string>('ai.cursorModel'),
+          window.electronAPI.db.settings.get<string>('ai.noteGenerationMode')
         ])
 
         if (savedUrl) setLmStudioUrl(savedUrl)
@@ -246,6 +282,7 @@ export function LLMSettings({ className, onSettingsChange }: LLMSettingsProps) {
         if (savedModel) setModel(savedModel)
         if (savedClaudeModel) setClaudeModel(savedClaudeModel as ClaudeModelType)
         if (savedCursorModel) setCursorModel(savedCursorModel as CursorModelType)
+        if (savedNoteMode) setNoteGenerationMode(savedNoteMode as NoteGenerationMode)
 
         // Detect providers after loading settings
         await detectProviders()
@@ -348,6 +385,13 @@ export function LLMSettings({ className, onSettingsChange }: LLMSettingsProps) {
     setSaveSuccess(false)
   }, [])
 
+  // Handle Note Generation Mode change
+  const handleNoteGenerationModeChange = useCallback((mode: NoteGenerationMode) => {
+    setNoteGenerationMode(mode)
+    setHasUnsavedChanges(true)
+    setSaveSuccess(false)
+  }, [])
+
   // Save settings
   const handleSaveSettings = useCallback(async () => {
     setIsSaving(true)
@@ -360,7 +404,8 @@ export function LLMSettings({ className, onSettingsChange }: LLMSettingsProps) {
         window.electronAPI.db.settings.set('ai.provider', provider, 'ai'),
         window.electronAPI.db.settings.set('ai.model', model, 'ai'),
         window.electronAPI.db.settings.set('ai.claudeModel', claudeModel, 'ai'),
-        window.electronAPI.db.settings.set('ai.cursorModel', cursorModel, 'ai')
+        window.electronAPI.db.settings.set('ai.cursorModel', cursorModel, 'ai'),
+        window.electronAPI.db.settings.set('ai.noteGenerationMode', noteGenerationMode, 'ai')
       ])
 
       // Also update the provider manager default
@@ -370,7 +415,7 @@ export function LLMSettings({ className, onSettingsChange }: LLMSettingsProps) {
       setSaveSuccess(true)
 
       // Notify parent component
-      onSettingsChange?.({ provider, lmStudioUrl, model, claudeModel, cursorModel })
+      onSettingsChange?.({ provider, lmStudioUrl, model, claudeModel, cursorModel, noteGenerationMode })
 
       // Clear success message after 3 seconds
       setTimeout(() => setSaveSuccess(false), 3000)
@@ -380,7 +425,7 @@ export function LLMSettings({ className, onSettingsChange }: LLMSettingsProps) {
     } finally {
       setIsSaving(false)
     }
-  }, [lmStudioUrl, provider, model, claudeModel, cursorModel, onSettingsChange])
+  }, [lmStudioUrl, provider, model, claudeModel, cursorModel, noteGenerationMode, onSettingsChange])
 
   // Get the currently selected provider info
   const selectedProviderInfo = providers.find(p => p.id === provider)
@@ -739,6 +784,63 @@ export function LLMSettings({ className, onSettingsChange }: LLMSettingsProps) {
           </div>
         </div>
       )}
+
+      {/* Note Generation Mode Selection */}
+      <div className="space-y-4 p-4 bg-secondary/30 rounded-lg">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-purple-600" />
+            <span className="font-medium text-foreground">Note Generation Mode</span>
+          </div>
+          <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-700">
+            AI Settings
+          </span>
+        </div>
+
+        {/* Info text */}
+        <div className="flex items-start gap-2">
+          <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-muted-foreground">
+            Controls how aggressively out-of-scope content is filtered when generating meeting notes.
+          </p>
+        </div>
+
+        {/* Mode selection - vertical list style */}
+        <div className="space-y-2" data-testid="note-generation-mode-selector">
+          {NOTE_GENERATION_MODES.map((modeOption) => (
+            <button
+              key={modeOption.id}
+              onClick={() => handleNoteGenerationModeChange(modeOption.id)}
+              className={cn(
+                'w-full flex flex-col items-start px-4 py-3 text-sm text-left transition-all rounded-lg border-2',
+                noteGenerationMode === modeOption.id
+                  ? 'bg-purple-600 text-white border-purple-600'
+                  : 'bg-background hover:bg-secondary text-foreground border-border'
+              )}
+              data-testid={`note-mode-${modeOption.id}`}
+            >
+              <span className="font-medium mb-1">{modeOption.name}</span>
+              <span className={cn(
+                'text-xs mb-2',
+                noteGenerationMode === modeOption.id
+                  ? 'text-white/90'
+                  : 'text-muted-foreground'
+              )}>
+                {modeOption.description}
+              </span>
+              <span className={cn(
+                'text-xs italic',
+                noteGenerationMode === modeOption.id
+                  ? 'text-white/75'
+                  : 'text-muted-foreground/75'
+              )}>
+                {modeOption.example}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Fallback Behavior Info */}
       <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
