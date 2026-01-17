@@ -224,8 +224,9 @@ class PythonExecutionManagerService extends EventEmitter {
     if (app?.isPackaged) {
       return process.resourcesPath || ''
     }
-    // In development, __dirname is dist-electron/services/
-    return path.join(__dirname, '../..')
+    // In development, __dirname is dist-electron/ (after Vite bundling)
+    // Go up one level to reach the project root
+    return path.join(__dirname, '..')
   }
 
   /**

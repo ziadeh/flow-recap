@@ -575,6 +575,14 @@ app.whenReady().then(async () => {
   // Initialize default settings
   settingsService.initializeDefaults(defaultSettings)
 
+  // One-time migration: Update existing 'balanced' validation level to 'fast'
+  // This ensures existing users get the new default behavior
+  const currentValidationLevel = settingsService.get<string>('transcription.startupValidationLevel')
+  if (currentValidationLevel === 'balanced') {
+    settingsService.set('transcription.startupValidationLevel', 'fast', 'transcription')
+    console.log('[Main] Migrated startup validation level from balanced to fast')
+  }
+
   // If HF_TOKEN is set in environment but not in settings, save it to settings
   // This allows users to set the token via environment variable on first run
   const envHfToken = process.env.HF_TOKEN

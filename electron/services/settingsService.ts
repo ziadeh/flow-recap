@@ -253,7 +253,7 @@ export const defaultSettings: CreateSettingInput[] = [
   { key: 'transcription.realtime', value: true, category: 'transcription' },
   { key: 'transcription.hfToken', value: '', category: 'transcription' },
   // Startup validation level: 'fast' (cached only), 'balanced' (verify critical packages), 'thorough' (full validation)
-  { key: 'transcription.startupValidationLevel', value: 'balanced', category: 'transcription' },
+  { key: 'transcription.startupValidationLevel', value: 'fast', category: 'transcription' },
 
   // AI settings
   { key: 'ai.provider', value: 'local', category: 'ai' },

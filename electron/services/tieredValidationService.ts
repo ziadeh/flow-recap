@@ -91,7 +91,7 @@ export interface TieredValidationResult extends ValidationResult {
 // ============================================================================
 
 const VALIDATION_LEVEL_KEY = 'transcription.startupValidationLevel'
-const DEFAULT_VALIDATION_LEVEL: ValidationLevel = 'balanced'
+const DEFAULT_VALIDATION_LEVEL: ValidationLevel = 'fast'
 const TIER1_TIMEOUT = 500 // 500ms max for Tier 1
 const TIER2_TIMEOUT = 10000 // 10s max for Tier 2
 const TIER3_TIMEOUT = 120000 // 2 minutes for model loading
