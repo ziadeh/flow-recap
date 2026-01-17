@@ -72,6 +72,21 @@
   }
 }
 
+/* Window Drag Region Styles for Electron Frameless Window */
+@layer utilities {
+  /* Make an element draggable (used for window title bar areas) */
+  .app-drag-region {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+
+  /* Exclude interactive elements from drag region */
+  .app-no-drag {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+}
+
 /* Speaker Box Styles */
 @layer components {
   /* Speaker box hover effects */

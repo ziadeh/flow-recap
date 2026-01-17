@@ -14,6 +14,7 @@ import {
   Keyboard,
   Search
 } from 'lucide-react'
+import appIcon from '../../resources/FlowRecap-sign.png'
 import { useNewMeeting } from '@/hooks/useNewMeeting'
 import { NewMeetingModal } from './NewMeetingModal'
 import { RecordingIndicator } from './RecordingIndicator'
@@ -148,13 +149,22 @@ function Sidebar({ collapsed, onToggle }: SidebarProps) {
         collapsed ? "w-16" : "w-64"
       )}
     >
+      {/* Drag region for macOS traffic lights area */}
+      <div className="h-8 app-drag-region flex-shrink-0" />
       {/* Top Section */}
-      <div className="p-4 border-b border-border">
+      <div className="px-4 pb-4 border-b border-border">
         {!collapsed ? (
           <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-bold text-foreground mt-2.5">FlowRecap</h2>
-              <p className="text-xs text-muted-foreground">v1.0.0</p>
+            <div className="flex items-center gap-2">
+              <img
+                src={appIcon}
+                alt="FlowRecap"
+                className="h-[42px] w-[42px] object-contain"
+              />
+              <div className="leading-tight">
+                <h2 className="text-lg font-bold text-foreground">FlowRecap</h2>
+                <p className="text-xs text-muted-foreground -mt-0.5">v1.0.0</p>
+              </div>
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -168,7 +178,11 @@ function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </div>
         ) : (
           <div className="flex flex-col items-center gap-2">
-            <h2 className="text-lg font-bold text-foreground">FR</h2>
+            <img
+              src={appIcon}
+              alt="FlowRecap"
+              className="h-[42px] w-[42px] object-contain"
+            />
             <button
               onClick={() => navigate('/settings')}
               className="p-1.5 rounded hover:bg-accent"
@@ -369,9 +383,9 @@ function Header() {
   }
 
   return (
-    <header className="h-20 bg-card border-b border-border flex items-center justify-between px-6 -webkit-app-region drag">
+    <header className="h-20 pt-2 bg-card border-b border-border flex items-center justify-between px-6 app-drag-region">
       {/* Left side - Page title */}
-      <div className="flex items-center gap-6 -webkit-app-region no-drag">
+      <div className="flex items-center gap-6 app-no-drag">
         <div>
           <h1 className="text-xl font-semibold text-foreground">{getPageTitle()}</h1>
           <p className="text-sm text-muted-foreground">FlowRecap</p>
@@ -379,7 +393,7 @@ function Header() {
       </div>
 
       {/* Right side - Recording indicator or New Meeting button */}
-      <div className="flex items-center gap-4 -webkit-app-region no-drag">
+      <div className="flex items-center gap-4 app-no-drag">
         {isRecording ? (
           /* Recording State - Show waveform and timer */
           <RecordingIndicator />
