@@ -281,7 +281,7 @@ jobs:
           print(f'  ✓ torchaudio {torchaudio.__version__}')
 
           import pyannote.audio
-          print(f'  ✓ pyannote.audio {pyannote.audio.__version__}')
+          print(f'  ✓ pyannote.audio {getattr(pyannote.audio, "__version__", "installed")}')
 
           import pyannote.core
           print(f'  ✓ pyannote.core')
