@@ -167,7 +167,7 @@ jobs:
           print(f'  ✓ torchaudio {torchaudio.__version__}')
 
           import whisperx
-          print(f'  ✓ whisperx {whisperx.__version__}')
+          print(f'  ✓ whisperx {getattr(whisperx, "__version__", "installed")}')
 
           import faster_whisper
           print(f'  ✓ faster_whisper')

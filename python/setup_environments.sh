@@ -549,7 +549,7 @@ generate_metadata() {
 
     # Get package versions
     local whisperx_torch_version=$("$whisperx_python" -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")
-    local whisperx_version=$("$whisperx_python" -c "import whisperx; print(whisperx.__version__)" 2>/dev/null || echo "unknown")
+    local whisperx_version=$("$whisperx_python" -c "import whisperx; print(getattr(whisperx, '__version__', 'installed'))" 2>/dev/null || echo "unknown")
     local pyannote_torch_version=$("$pyannote_python" -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")
     local pyannote_version=$("$pyannote_python" -c "from pyannote.audio import Pipeline; import pyannote.audio; print(pyannote.audio.__version__)" 2>/dev/null || echo "unknown")
 

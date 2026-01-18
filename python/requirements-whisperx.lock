@@ -26,7 +26,7 @@ transformers==4.44.0
 
 # PyTorch Ecosystem (WhisperX Version)
 torch==2.8.0
-torchaudio==2.5.0
+torchaudio==2.8.0
 
 # Audio Processing
 soundfile==0.12.1

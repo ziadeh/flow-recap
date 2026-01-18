@@ -333,7 +333,7 @@ source venv-test/bin/activate
 pip install -r requirements-whisperx.txt
 
 # 4. Run transcription test
-python -c "import whisperx; print(whisperx.__version__)"
+python -c "import whisperx; print(getattr(whisperx, '__version__', 'installed'))"
 
 # 5. If successful, update real environment
 rm -rf venv-whisperx

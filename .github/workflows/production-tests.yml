@@ -239,6 +239,9 @@ jobs:
 
       - name: Run Electron E2E tests
         run: npx playwright test tests/production/electron-app.spec.ts --reporter=list
+        # Note: On Windows CI, the Electron App E2E Tests are automatically skipped
+        # because there's no virtual framebuffer like xvfb on Linux.
+        # Only the Standalone Build Verification tests will run.
 
       - name: Run core functionality tests
         run: npx playwright test tests/production/core-functionality.spec.ts --reporter=list
