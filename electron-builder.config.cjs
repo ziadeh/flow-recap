@@ -568,6 +568,11 @@ const config = {
       ? "resources/installer/nsis-custom.nsh"
       : undefined,
 
+    // Allow NSIS warnings without failing the build
+    // This is needed because the custom NSIS script has optional features
+    // (like VirtualAudioPage) that may not be referenced in all build scenarios
+    warningsAsErrors: false,
+
     // Installer language
     language: "1033", // English
 
