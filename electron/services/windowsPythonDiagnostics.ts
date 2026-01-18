@@ -453,7 +453,7 @@ class WindowsPythonDiagnosticsService extends EventEmitter {
             }
 
             if (result.isValid) {
-              loggerService.info('[WindowsDiagnostics] Found Python via py launcher', result)
+              loggerService.info('[WindowsDiagnostics] Found Python via py launcher', { ...result })
               return result
             }
           }
@@ -494,7 +494,7 @@ class WindowsPythonDiagnosticsService extends EventEmitter {
           result.arch = process.arch
           result.installDir = path.dirname(pythonPath)
 
-          loggerService.info('[WindowsDiagnostics] Found Python via python command', result)
+          loggerService.info('[WindowsDiagnostics] Found Python via python command', { ...result })
           return result
         }
       }
@@ -527,7 +527,7 @@ class WindowsPythonDiagnosticsService extends EventEmitter {
                 result.isValid = true
                 result.arch = process.arch
                 result.installDir = path.dirname(pythonExe)
-                loggerService.info('[WindowsDiagnostics] Found Python in common path', result)
+                loggerService.info('[WindowsDiagnostics] Found Python in common path', { ...result })
                 return result
               }
             } catch {
@@ -554,7 +554,7 @@ class WindowsPythonDiagnosticsService extends EventEmitter {
               result.isValid = true
               result.arch = process.arch
               result.installDir = basePath
-              loggerService.info('[WindowsDiagnostics] Found Python in base path', result)
+              loggerService.info('[WindowsDiagnostics] Found Python in base path', { ...result })
               return result
             }
           } catch {
@@ -642,7 +642,7 @@ class WindowsPythonDiagnosticsService extends EventEmitter {
         ]
       }
 
-      loggerService.info('[WindowsDiagnostics] Visual C++ check', result)
+      loggerService.info('[WindowsDiagnostics] Visual C++ check', { ...result })
       return result
     } catch (error) {
       result.error = `Failed to check Visual C++: ${error instanceof Error ? error.message : String(error)}`
@@ -715,7 +715,7 @@ class WindowsPythonDiagnosticsService extends EventEmitter {
       ]
     }
 
-    loggerService.info('[WindowsDiagnostics] Path length check', result)
+    loggerService.info('[WindowsDiagnostics] Path length check', { ...result })
     return result
   }
 
@@ -751,7 +751,7 @@ class WindowsPythonDiagnosticsService extends EventEmitter {
         ]
       }
 
-      loggerService.info('[WindowsDiagnostics] Execution policy check', result)
+      loggerService.info('[WindowsDiagnostics] Execution policy check', { ...result })
       return result
     } catch (error) {
       result.error = `Failed to check execution policy: ${error instanceof Error ? error.message : String(error)}`
@@ -886,7 +886,7 @@ class WindowsPythonDiagnosticsService extends EventEmitter {
       result.encoding = 'unknown'
     }
 
-    loggerService.info('[WindowsDiagnostics] Subprocess spawn check', result)
+    loggerService.info('[WindowsDiagnostics] Subprocess spawn check', { ...result })
     return result
   }
 
@@ -936,7 +936,7 @@ class WindowsPythonDiagnosticsService extends EventEmitter {
         }
       }
 
-      loggerService.info('[WindowsDiagnostics] CUDA check', result)
+      loggerService.info('[WindowsDiagnostics] CUDA check', { ...result })
       return result
     } catch (error) {
       result.error = 'NVIDIA GPU not detected. Transcription will use CPU mode.'
