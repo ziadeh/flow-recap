@@ -72,7 +72,7 @@
     "transcription",
     "ai"
   ],
-  "author": "",
+  "author": "FlowRecap Team",
   "license": "MIT",
   "devDependencies": {
     "@electron/notarize": "^2.3.0",
