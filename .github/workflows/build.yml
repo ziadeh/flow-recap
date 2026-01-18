@@ -41,6 +41,11 @@ on:
         required: false
         default: false
         type: boolean
+      windows_x64_only:
+        description: 'Windows: Build x64 only (skip 32-bit ia32)'
+        required: false
+        default: true
+        type: boolean
 
 env:
   NODE_VERSION: '20'
@@ -96,6 +101,7 @@ jobs:
     name: Build Windows
     runs-on: windows-latest
     if: ${{ github.event_name == 'push' || github.event.inputs.build_win == 'true' }}
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -111,7 +117,15 @@ jobs:
         run: npm ci
 
       - name: Build application
-        run: npm run dist:win
+        run: |
+          if [ "${{ github.event.inputs.windows_x64_only }}" = "true" ] || [ "${{ github.event_name }}" = "push" ]; then
+            echo "Building Windows x64 only (faster CI build)"
+            npm run dist:win:x64
+          else
+            echo "Building Windows x64 and ia32"
+            npm run dist:win
+          fi
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Code signing (optional - skipped if not set)

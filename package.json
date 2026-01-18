@@ -19,6 +19,7 @@
     "build:win": "npm run build:vite && electron-builder --win --config electron-builder.config.cjs",
     "build:win:x64": "npm run build:vite && electron-builder --win --x64 --config electron-builder.config.cjs",
     "build:win:ia32": "npm run build:vite && electron-builder --win --ia32 --config electron-builder.config.cjs",
+    "build:win:ci": "npm run build:vite && electron-builder --win --x64 -c.win.target=nsis -c.win.target=zip --config electron-builder.config.cjs",
     "build:linux": "npm run build:vite && electron-builder --linux --config electron-builder.config.cjs",
     "build:all": "npm run build:vite && electron-builder --mac --win --linux --config electron-builder.config.cjs",
 

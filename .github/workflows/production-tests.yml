@@ -54,9 +54,11 @@ env:
   PLAYWRIGHT_BROWSERS_PATH: 0
 
 # Cancel in-progress runs for the same branch
+# Note: cancel-in-progress is set to false for production tests to prevent
+# "The operation was canceled" errors during long-running macOS builds
 concurrency:
   group: production-tests-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   # ===========================================================================
@@ -125,6 +127,9 @@ jobs:
     name: Test macOS Production Build
     needs: build-verification
     runs-on: macos-latest
+    # Add explicit timeout to prevent workflow cancellation due to long build times
+    # macOS builds with dual architectures can take 30+ minutes
+    timeout-minutes: 60
     if: ${{ github.event.inputs.test_platforms == 'all' || github.event.inputs.test_platforms == 'macos' || github.event.inputs.test_platforms == '' }}
 
     steps:
@@ -153,9 +158,12 @@ jobs:
         if: ${{ github.event.inputs.skip_build != 'true' }}
         run: |
           # Build without code signing for testing
-          CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:mac
+          # Build only for arm64 (native arch on GitHub's macos-latest runners) to speed up CI
+          # This reduces build time by ~50% and avoids cross-compilation issues
+          CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:mac:arm64
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        timeout-minutes: 30
 
       - name: Run Electron E2E tests
         run: npx playwright test tests/production/electron-app.spec.ts --reporter=list
@@ -206,6 +214,7 @@ jobs:
     name: Test Windows Production Build
     needs: build-verification
     runs-on: windows-latest
+    timeout-minutes: 45
     if: ${{ github.event.inputs.test_platforms == 'all' || github.event.inputs.test_platforms == 'windows' || github.event.inputs.test_platforms == '' }}
 
     steps:
@@ -233,9 +242,10 @@ jobs:
       - name: Build Windows app (unsigned)
         if: ${{ github.event.inputs.skip_build != 'true' }}
         run: |
-          npm run build:win
+          npm run build:win:x64
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        timeout-minutes: 25
 
       - name: Run Electron E2E tests
         run: npx playwright test tests/production/electron-app.spec.ts --reporter=list
@@ -274,6 +284,7 @@ jobs:
     name: Test Linux Production Build
     needs: build-verification
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     if: ${{ github.event.inputs.test_platforms == 'all' || github.event.inputs.test_platforms == 'linux' || github.event.inputs.test_platforms == '' }}
 
     steps:
@@ -324,6 +335,7 @@ jobs:
           npm run build:linux
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        timeout-minutes: 25
 
       - name: Start Xvfb
         run: |
