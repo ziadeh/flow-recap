@@ -18,7 +18,10 @@ faster-whisper>=1.0.0
 
 # pyannote.audio - Speaker diarization toolkit
 # https://github.com/pyannote/pyannote-audio
-pyannote.audio>=3.1.1
+# IMPORTANT: Version <4.0 required for compatibility with whisperx
+# pyannote.audio 4.0+ has breaking changes (switched from torchaudio to torchcodec)
+# See: https://github.com/m-bain/whisperX/issues/1241
+pyannote.audio>=3.1.1,<4.0
 
 # speechbrain - Alternative speaker embedding extraction
 # https://github.com/speechbrain/speechbrain

@@ -31,6 +31,12 @@
 # Primary backend for transcription with VAD-based chunking
 whisperx>=3.0
 
+# pyannote.audio - Speaker diarization (used by whisperx)
+# IMPORTANT: Version <4.0 required for compatibility with whisperx
+# pyannote.audio 4.0+ has breaking changes (switched from torchaudio to torchcodec)
+# See: https://github.com/m-bain/whisperX/issues/1241
+pyannote-audio>=3.1,<4.0
+
 # faster-whisper - High-performance CTranslate2 backend for Whisper
 # https://github.com/SYSTRAN/faster-whisper
 # Provides 4x speed improvement over original whisper
