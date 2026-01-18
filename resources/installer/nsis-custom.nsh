@@ -106,7 +106,9 @@ SectionEnd
 ; -----------------------------------------------------------------------------
 !macro customInstallMode
   ; Use per-user installation by default
-  StrCpy $InstMode "CurrentUser"
+  ; This sets the installation mode to current user only (no admin elevation required)
+  ; See: https://www.electron.build/nsis.html
+  StrCpy $isForceCurrentInstall "1"
 !macroend
 
 !macro customPageAfterChangeDir

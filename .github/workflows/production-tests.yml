@@ -329,9 +329,13 @@ jobs:
 
       - name: Run Electron E2E tests
         run: xvfb-run --auto-servernum npx playwright test tests/production/electron-app.spec.ts --reporter=list
+        env:
+          ELECTRON_DISABLE_SANDBOX: 1
 
       - name: Run core functionality tests
         run: xvfb-run --auto-servernum npx playwright test tests/production/core-functionality.spec.ts --reporter=list
+        env:
+          ELECTRON_DISABLE_SANDBOX: 1
 
       - name: Verify .desktop file generation
         run: |

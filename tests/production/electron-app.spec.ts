@@ -33,6 +33,11 @@ const isBuilt = fs.existsSync(MAIN_PATH)
 // Check if we're in CI environment (Electron tests may not work in headless CI)
 const isCI = process.env.CI === 'true'
 
+// Check if we're on Linux CI - requires special sandbox handling
+// Also check ELECTRON_DISABLE_SANDBOX env var which can be set in CI workflows
+const isLinuxCI = isCI && process.platform === 'linux'
+const shouldDisableSandbox = isLinuxCI || process.env.ELECTRON_DISABLE_SANDBOX === '1'
+
 // Flag to track if Electron launch succeeded
 let electronLaunchFailed = false
 
@@ -53,9 +58,16 @@ test.describe('Electron App E2E Tests', () => {
     }
 
     try {
+      // Build args for Electron launch
+      // On Linux CI, we need to disable the sandbox due to SUID sandbox permissions
+      // The sandbox requires elevated permissions not available in CI environments
+      const electronArgs = shouldDisableSandbox
+        ? ['--no-sandbox', '--disable-gpu', MAIN_PATH]
+        : [MAIN_PATH]
+
       // Launch Electron app with timeout
       electronApp = await electron.launch({
-        args: [MAIN_PATH],
+        args: electronArgs,
         env: {
           ...process.env,
           NODE_ENV: 'production',
