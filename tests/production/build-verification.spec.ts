@@ -37,7 +37,7 @@ test.describe('Build Artifact Verification', () => {
     const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf-8'))
 
     // Verify essential fields
-    expect(packageJson.name).toBe('meeting-notes')
+    expect(packageJson.name).toBe('flowrecap')
     expect(packageJson.main).toBe('dist-electron/main.js')
     expect(packageJson.version).toMatch(/^\d+\.\d+\.\d+/)
   })
@@ -48,8 +48,8 @@ test.describe('Build Artifact Verification', () => {
 
     // Verify config is valid JavaScript
     const config = require(configPath)
-    expect(config.appId).toBe('com.meeting-notes.app')
-    expect(config.productName).toBe('Meeting Notes')
+    expect(config.appId).toBe('com.flowrecap.app')
+    expect(config.productName).toBe('FlowRecap')
   })
 
   test('should have required build scripts', () => {
@@ -161,8 +161,8 @@ test.describe('Release Artifacts', () => {
 
       // Only check main app artifacts (not bundled resources)
       // Main app artifacts should contain the product name
-      const isMainArtifact = artifact.name.includes('Meeting Notes') ||
-                              artifact.name.includes('meeting-notes')
+      const isMainArtifact = artifact.name.includes('FlowRecap') ||
+                              artifact.name.includes('flowrecap')
 
       // Artifacts should be at least 50MB (Electron app minimum)
       // and less than 1GB (reasonable maximum)

@@ -104,7 +104,7 @@ class RequirementsValidator:
     EXPECTED_VERSIONS = {
         "requirements-whisperx.txt": {
             "torch": "2.8.0",
-            "torchaudio": "2.5.0",
+            "torchaudio": "2.8.0",
         },
         "requirements-pyannote.txt": {
             "torch": "2.5.1",
@@ -344,9 +344,13 @@ class RequirementsValidator:
 
         # Check for packages that should be shared but have different versions
         common_packages = set(whisperx_dict.keys()) & set(pyannote_dict.keys())
+        # Known packages that intentionally have different versions between environments
+        # torch/torchaudio: Different PyTorch versions required by each environment
+        # numpy: whisperx/librosa requires <2.0, pyannote works with >=1.24.0
+        known_different_versions = ["torch", "torchaudio", "numpy"]
         for pkg in common_packages:
-            if pkg in ["torch", "torchaudio"]:
-                continue  # Known differences
+            if pkg in known_different_versions:
+                continue  # Known acceptable differences
 
             wx_ver = whisperx_dict[pkg].version_spec
             py_ver = pyannote_dict[pkg].version_spec

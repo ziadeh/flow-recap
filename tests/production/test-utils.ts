@@ -1,7 +1,7 @@
 /**
  * Production Build Test Utilities
  *
- * Shared utilities for testing production builds of the Meeting Notes Electron app.
+ * Shared utilities for testing production builds of the FlowRecap Electron app.
  * Provides helpers for:
  * - Launching packaged Electron apps
  * - Verifying app startup and basic functionality
@@ -59,18 +59,18 @@ export const PLATFORM_CONFIGS: Record<NodeJS.Platform, PlatformTestConfig> = {
   darwin: {
     platform: 'darwin',
     installerTypes: ['dmg', 'zip'],
-    appExecutableName: 'Meeting Notes.app',
-    appBundlePath: '/Applications/Meeting Notes.app/Contents/MacOS/Meeting Notes'
+    appExecutableName: 'FlowRecap.app',
+    appBundlePath: '/Applications/FlowRecap.app/Contents/MacOS/FlowRecap'
   },
   win32: {
     platform: 'win32',
     installerTypes: ['exe', 'zip', 'portable'],
-    appExecutableName: 'Meeting Notes.exe'
+    appExecutableName: 'FlowRecap.exe'
   },
   linux: {
     platform: 'linux',
     installerTypes: ['AppImage', 'deb', 'rpm', 'snap'],
-    appExecutableName: 'meeting-notes'
+    appExecutableName: 'flowrecap'
   },
   // Placeholder for other platforms
   aix: { platform: 'aix', installerTypes: [], appExecutableName: '' },
@@ -257,7 +257,7 @@ export async function launchPackagedApp(appPath: string): Promise<AppStartResult
       if (process.platform === 'darwin') {
         // macOS: Use open command or launch .app directly
         if (appPath.endsWith('.app')) {
-          const executablePath = path.join(appPath, 'Contents/MacOS/Meeting Notes')
+          const executablePath = path.join(appPath, 'Contents/MacOS/FlowRecap')
           child = spawn(executablePath, [], {
             detached: true,
             stdio: 'ignore'
@@ -382,7 +382,7 @@ export function verifyAppBundle(appPath: string): { valid: boolean; missing: str
 
   if (process.platform === 'darwin') {
     const expectedPaths = [
-      'Contents/MacOS/Meeting Notes',
+      'Contents/MacOS/FlowRecap',
       'Contents/Resources/app.asar',
       'Contents/Info.plist'
     ]

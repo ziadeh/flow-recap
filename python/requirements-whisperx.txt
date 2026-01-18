@@ -65,7 +65,7 @@ torchaudio==2.8.0
 
 # SoundFile - Read and write sound files
 # https://pysoundfile.readthedocs.io/
-soundfile>=0.12
+soundfile>=0.12.1
 
 # librosa - Audio and music analysis
 # https://librosa.org/

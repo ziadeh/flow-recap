@@ -1,7 +1,7 @@
 /**
  * Core Functionality Verification Tests
  *
- * Tests that verify the core functionality of the Meeting Notes app
+ * Tests that verify the core functionality of the FlowRecap app
  * works correctly in production builds:
  *
  * 1. Create meeting

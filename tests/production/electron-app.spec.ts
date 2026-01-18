@@ -1,7 +1,7 @@
 /**
  * Electron App E2E Tests
  *
- * End-to-end tests for the Meeting Notes Electron application.
+ * End-to-end tests for the FlowRecap Electron application.
  * Uses Playwright to test the packaged application's core functionality.
  *
  * These tests verify:
@@ -229,11 +229,23 @@ test.describe('Electron App E2E Tests', () => {
   test('should report correct app name', async () => {
     if (!isBuilt || electronLaunchFailed) test.skip()
 
-    const name = await electronApp.evaluate(async ({ app }) => {
-      return app.getName()
+    const appInfo = await electronApp.evaluate(async ({ app }) => {
+      return {
+        name: app.getName(),
+        isPackaged: app.isPackaged
+      }
     })
 
-    expect(name.toLowerCase()).toContain('meeting')
+    // In development mode, Electron reports its name as 'electron' or the package.json name
+    // In production (packaged), it reports the productName from electron-builder config
+    if (appInfo.isPackaged) {
+      expect(appInfo.name.toLowerCase()).toContain('flowrecap')
+    } else {
+      // In dev mode, accept 'electron' or 'flowrecap' (from package.json name)
+      const nameLower = appInfo.name.toLowerCase()
+      expect(nameLower === 'electron' || nameLower === 'flowrecap').toBe(true)
+    }
+    console.log(`App name: ${appInfo.name} (isPackaged: ${appInfo.isPackaged})`)
   })
 
   // ==========================================================================
@@ -272,8 +284,16 @@ test.describe('Standalone Build Verification', () => {
     }
 
     const stats = fs.statSync(mainJsPath)
-    expect(stats.size).toBeGreaterThan(1000) // Should be substantial
+    // main.js is an entry point that requires bundled chunks, so it may be small
+    expect(stats.size).toBeGreaterThan(0)
     console.log('main.js size:', (stats.size / 1024).toFixed(2), 'KB')
+
+    // Verify the bundled chunks exist in dist-electron
+    const distElectronPath = path.join(PROJECT_ROOT, 'dist-electron')
+    const files = fs.readdirSync(distElectronPath)
+    const bundleFiles = files.filter(f => f.endsWith('.js') && f !== 'main.js' && f !== 'preload.js')
+    console.log('Bundled chunks:', bundleFiles.length)
+    expect(bundleFiles.length).toBeGreaterThan(0)
   })
 
   test('should have preload.js built', () => {

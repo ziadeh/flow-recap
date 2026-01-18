@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-01-14T10:12:13.735Z",
+  "timestamp": "2026-01-18T10:31:45.372Z",
   "platform": "darwin",
   "arch": "arm64",
   "nodeVersion": "v20.14.0",
   "metrics": {
-    "main.js": 174,
-    "preload.js": 30496,
-    "artifactCount": 12,
-    "totalArtifactSize": 1748805440
+    "main.js": 182,
+    "preload.js": 79645,
+    "artifactCount": 8,
+    "totalArtifactSize": 897950825
   }
 }

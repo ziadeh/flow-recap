@@ -235,7 +235,7 @@ test.describe('Linux Platform Tests', () => {
     const config = require(configPath)
 
     const desktop = config.linux.desktop
-    expect(desktop.Name).toBe('Meeting Notes')
+    expect(desktop.Name).toBe('FlowRecap')
     expect(desktop.Comment).toBeTruthy()
     expect(desktop.Categories).toContain('Office')
   })
