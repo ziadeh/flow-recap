@@ -119,9 +119,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-whisperx-${{ hashFiles('python/requirements-whisperx.txt') }}
+          # Cache key includes workflow file hash to bust cache when workflow changes
+          key: ${{ runner.os }}-pip-whisperx-v2-${{ hashFiles('python/requirements-whisperx.txt', '.github/workflows/requirements-validation.yml') }}
           restore-keys: |
-            ${{ runner.os }}-pip-whisperx-
+            ${{ runner.os }}-pip-whisperx-v2-
 
       - name: Create virtual environment
         run: |
@@ -136,12 +137,20 @@ jobs:
       - name: Install dependencies
         run: |
           source venv-whisperx/bin/activate
+          # IMPORTANT: Install pyannote-audio first with version constraint
+          # pyannote-audio 4.0+ has breaking changes that cause import errors
+          # See: https://github.com/m-bain/whisperX/issues/1241
+          pip install "pyannote-audio>=3.1,<4.0"
           if [ "${{ github.event.inputs.use_lockfiles }}" == "true" ]; then
             pip install -r python/requirements-whisperx.lock
           else
             pip install -r python/requirements-whisperx.txt
           fi
           pip install -r python/requirements-common.txt
+          # Verify pyannote-audio version is <4.0 (critical for whisperx compatibility)
+          echo "Verifying pyannote-audio version..."
+          pip show pyannote-audio | grep Version
+          python -c "import pyannote.audio; v = getattr(pyannote.audio, '__version__', 'unknown'); print(f'pyannote.audio version: {v}'); assert v == 'unknown' or not v.startswith('4'), f'pyannote.audio 4.x detected: {v}'"
 
       - name: Verify torch version
         run: |
