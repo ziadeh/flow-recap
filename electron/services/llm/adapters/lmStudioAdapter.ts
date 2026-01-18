@@ -98,7 +98,7 @@ export class LMStudioAdapter implements ILLMProvider {
    * Update provider configuration
    */
   updateConfig(config: Partial<LLMProviderConfig>): void {
-    this.config = { ...this.config, ...config }
+    this.config = { ...this.config, ...config } as LocalProviderConfig
     this.syncConfigToClient()
   }
 

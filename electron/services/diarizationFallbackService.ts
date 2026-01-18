@@ -617,8 +617,4 @@ export const diarizationFallbackService = {
   }
 }
 
-// Export types
-export type {
-  FallbackSessionState,
-  FallbackNotification
-}
+// Note: Types are exported inline at their definitions above

@@ -830,22 +830,22 @@ except Exception as e:
     else:
         print('ERROR:' + error_str)
 `
-      const process = spawn(pythonPath, ['-c', script], {
+      const childProcess = spawn(pythonPath, ['-c', script], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, PYTHONUNBUFFERED: '1' }
+        env: { ...globalThis.process.env, PYTHONUNBUFFERED: '1' }
       })
 
       let stdout = ''
       let stderr = ''
 
-      process.stdout?.on('data', (data) => { stdout += data.toString() })
-      process.stderr?.on('data', (data) => { stderr += data.toString() })
+      childProcess.stdout?.on('data', (data: Buffer) => { stdout += data.toString() })
+      childProcess.stderr?.on('data', (data: Buffer) => { stderr += data.toString() })
 
-      process.on('error', () => {
+      childProcess.on('error', () => {
         resolve({ valid: false, error: 'Failed to run Python for token validation' })
       })
 
-      process.on('exit', (code) => {
+      childProcess.on('exit', (code: number | null) => {
         if (stdout.startsWith('VALID:')) {
           resolve({ valid: true })
         } else if (stdout.startsWith('INVALID:')) {
@@ -857,7 +857,7 @@ except Exception as e:
 
       // Timeout after 30 seconds
       setTimeout(() => {
-        process.kill('SIGTERM')
+        childProcess.kill('SIGTERM')
         resolve({ valid: false, error: 'Token validation timed out' })
       }, 30000)
     })
@@ -887,27 +887,27 @@ except Exception as e:
         # Network or other errors - assume access is ok
         print('ACCESS:true')
 `
-      const process = spawn(pythonPath, ['-c', script], {
+      const childProcess = spawn(pythonPath, ['-c', script], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, PYTHONUNBUFFERED: '1' }
+        env: { ...globalThis.process.env, PYTHONUNBUFFERED: '1' }
       })
 
       let stdout = ''
 
-      process.stdout?.on('data', (data) => { stdout += data.toString() })
+      childProcess.stdout?.on('data', (data: Buffer) => { stdout += data.toString() })
 
-      process.on('error', () => {
+      childProcess.on('error', () => {
         // On error, assume access is ok (let the actual download handle it)
         resolve(true)
       })
 
-      process.on('exit', () => {
+      childProcess.on('exit', () => {
         resolve(stdout.includes('ACCESS:true'))
       })
 
       // Timeout after 15 seconds per model
       setTimeout(() => {
-        process.kill('SIGTERM')
+        childProcess.kill('SIGTERM')
         resolve(true) // Assume ok on timeout
       }, 15000)
     })

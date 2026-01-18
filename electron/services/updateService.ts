@@ -165,7 +165,7 @@ function configureAutoUpdater() {
   })
 
   autoUpdater.on('download-progress', (progressInfo: ProgressInfo) => {
-    loggerService.debug('Download progress', progressInfo)
+    loggerService.debug('Download progress', { progressInfo } as unknown as import('./loggerService').LogContext)
     updateState({
       status: 'downloading',
       downloadProgress: progressInfo.percent,

@@ -464,7 +464,7 @@ class PythonEnvironmentValidatorService extends EventEmitter {
       // Calculate pyannote-specific readiness
       const pyannoteModelCheck = checks.find(c => c.type === 'pyannote_model')
       const packageCheck = checks.find(c => c.type === 'package_imports')
-      const pyannoteImportOk = packageCheck?.details?.results?.['pyannote.audio'] === true
+      const pyannoteImportOk = (packageCheck?.details?.results as Record<string, boolean> | undefined)?.['pyannote.audio'] === true
 
       if (pyannoteImportOk) {
         if (pyannoteModelCheck?.status === 'pass') {
@@ -484,8 +484,9 @@ class PythonEnvironmentValidatorService extends EventEmitter {
       }
 
       // Calculate whisperx-specific readiness
-      const whisperxImportOk = packageCheck?.details?.results?.['whisperx'] === true ||
-                               packageCheck?.details?.results?.['faster_whisper'] === true
+      const packageResults = packageCheck?.details?.results as Record<string, boolean> | undefined
+      const whisperxImportOk = packageResults?.['whisperx'] === true ||
+                               packageResults?.['faster_whisper'] === true
 
       if (whisperxImportOk) {
         dualEnvironment.whisperxReadiness = 'ready'

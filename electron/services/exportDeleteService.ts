@@ -1318,10 +1318,23 @@ class ExportDeleteService {
       if (options.importContent.notes && data.notes) {
         for (const note of data.notes) {
           try {
-            meetingNoteService.create({
+            // Transform note to match CreateMeetingNoteInput types
+            const noteInput = {
               ...note,
-              meeting_id: meetingId
-            })
+              meeting_id: meetingId,
+              // Parse source_transcript_ids from JSON string if present
+              source_transcript_ids: note.source_transcript_ids
+                ? JSON.parse(note.source_transcript_ids) as string[]
+                : undefined,
+              // Convert null to undefined for optional fields
+              context: note.context || undefined,
+              keywords: note.keywords
+                ? JSON.parse(note.keywords) as string[]
+                : undefined,
+              generation_timestamp: note.generation_timestamp || undefined,
+              confidence_score: note.confidence_score || undefined,
+            }
+            meetingNoteService.create(noteInput)
             importedContent.notes++
           } catch {
             // Skip duplicates

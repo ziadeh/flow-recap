@@ -668,11 +668,4 @@ export const diarizationHealthMonitor = {
   }
 }
 
-// Export types
-export type {
-  DiarizationHealthEvent,
-  DiarizationHealthStats,
-  DiarizationHealthConfig,
-  PostMeetingRecoveryJob,
-  RecoveryOption
-}
+// Note: Types are exported inline at their definitions above

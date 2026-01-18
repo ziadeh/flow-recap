@@ -596,7 +596,7 @@ class PythonValidationCacheService {
   ): void {
     const hash = validationHash || this.computeEnvironmentHash(
       validationResult.environment?.pythonPath || null,
-      validationResult.environment?.venvPaths
+      (validationResult.environment as { venvPaths?: string[] } | undefined)?.venvPaths
     )
     this.cacheValidationResult(envName, validationResult, hash, maxAgeHours)
   }

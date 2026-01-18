@@ -42,7 +42,7 @@ import type { NoteType, TaskPriority } from '../../src/types/database'
 export type StrictnessMode = 'strict' | 'balanced' | 'loose'
 export type RelevanceType = 'in_scope_important' | 'in_scope_minor' | 'out_of_scope' | 'unclear'
 export type SubjectStatus = 'draft' | 'locked'
-export type SessionStatus = 'idle' | 'active' | 'paused' | 'finalizing' | 'completed' | 'error'
+export type SessionStatus = 'idle' | 'active' | 'processing' | 'paused' | 'finalizing' | 'completed' | 'error'
 export type CandidateNoteType = 'key_point' | 'decision' | 'action_item' | 'task' | 'other_note'
 
 export interface MeetingSubject {
@@ -611,6 +611,10 @@ class SubjectAwareNoteGenerationService {
       candidatesExtracted: 0,
       notesFinalized: 0,
       generatedCandidates: [],
+      weightedTitles: new Map(),
+      weightedGoals: new Map(),
+      weightedKeywords: new Map(),
+      detectionHistory: [],
     }
 
     // Store session in database

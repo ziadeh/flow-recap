@@ -476,7 +476,12 @@ export const temporalAlignmentService = {
     }
 
     // Split the transcription at speaker change points
-    const splitSegments = splitTextByTime(text, startTime, endTime, speakerChanges)
+    // Convert speaker changes to split points with speakerId (using toSpeaker as the active speaker after the change)
+    const splitPoints = speakerChanges.map(change => ({
+      time: change.time,
+      speakerId: change.toSpeaker
+    }))
+    const splitSegments = splitTextByTime(text, startTime, endTime, splitPoints)
 
     return splitSegments.map(split => ({
       text: split.text.trim(),
@@ -623,10 +628,4 @@ export const temporalAlignmentService = {
   }
 }
 
-// Export types
-export type {
-  TranscriptionSegmentInput,
-  AlignedTranscriptSegment,
-  DiarizationValidationResult,
-  TemporalAlignmentConfig
-}
+// Note: Types are exported inline at their definitions above

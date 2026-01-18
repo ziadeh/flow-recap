@@ -712,7 +712,8 @@ class ConfidenceScoringService {
    */
   getTrends(meetingId: string): ConfidenceTrend[] {
     const stmts = getStatements()
-    const rows = stmts.getTrendsByMeetingId.all(meetingId) as Array<ConfidenceTrend & { is_alert_triggered: number }>
+    // Database stores is_alert_triggered as integer (0/1), we convert to boolean
+    const rows = stmts.getTrendsByMeetingId.all(meetingId) as Array<Omit<ConfidenceTrend, 'is_alert_triggered'> & { is_alert_triggered: number }>
     return rows.map(row => ({
       ...row,
       is_alert_triggered: row.is_alert_triggered === 1
@@ -724,7 +725,8 @@ class ConfidenceScoringService {
    */
   getAlerts(meetingId: string): ConfidenceTrend[] {
     const stmts = getStatements()
-    const rows = stmts.getAlertsForMeeting.all(meetingId) as Array<ConfidenceTrend & { is_alert_triggered: number }>
+    // Database stores is_alert_triggered as integer (0/1), we convert to boolean
+    const rows = stmts.getAlertsForMeeting.all(meetingId) as Array<Omit<ConfidenceTrend, 'is_alert_triggered'> & { is_alert_triggered: number }>
     return rows.map(row => ({
       ...row,
       is_alert_triggered: true

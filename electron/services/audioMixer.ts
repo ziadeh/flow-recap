@@ -72,7 +72,7 @@ export interface AudioMixerState {
  * - Logs warnings when sample rate corrections are applied
  */
 export class AudioMixer {
-  private config: Required<AudioMixerConfig> & { onMixedChunk?: (chunk: Buffer, sampleRate: number, channels: number, bitDepth: number) => void; onMicrophoneChunk?: (chunk: Buffer, sampleRate: number, channels: number, bitDepth: number) => void; onSystemAudioChunk?: (chunk: Buffer, sampleRate: number, channels: number, bitDepth: number) => void }
+  private config: Required<Omit<AudioMixerConfig, 'onMixedChunk' | 'onMicrophoneChunk' | 'onSystemAudioChunk'>> & Pick<AudioMixerConfig, 'onMixedChunk' | 'onMicrophoneChunk' | 'onSystemAudioChunk'>
   private wavWriter: RealTimeWavWriter | null = null
   private microphoneBuffer: Buffer[] = []
   private systemAudioBuffer: Buffer[] = []

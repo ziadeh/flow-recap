@@ -1098,7 +1098,7 @@ export const liveTranscriptionService = {
         // Write audio data to Python process
         if (currentState.status === 'active') {
           try {
-            const writeResult = streamingProcess.stdin.write(chunkData.data)
+            const writeResult = streamingProcess?.stdin?.write(chunkData.data)
             audioChunksToPython++
             totalAudioBytesToPython += chunkData.data.length
 

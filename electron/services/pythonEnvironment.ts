@@ -106,6 +106,11 @@ export interface PythonEnvironmentStatus {
     pyannotePath: string | null
     whisperxReady: boolean
     pyannoteReady: boolean
+    // Extended status for detailed validation
+    whisperxReadiness?: 'ready' | 'functional' | 'failed'
+    whisperxStatusMessage?: string
+    pyannoteReadiness?: 'ready' | 'functional' | 'failed'
+    pyannoteStatusMessage?: string
   }
 }
 
@@ -634,7 +639,15 @@ class PythonEnvironmentService extends EventEmitter {
         const pyannotePath = status.dualEnvironment.pyannotePath
         if (pyannotePath && fs.existsSync(pyannotePath)) {
           try {
-            execSync(`"${pyannotePath}" -c "from pyannote.audio import Pipeline" 2>&1`, execOptions)
+            const pyannoteExecOptions = {
+              encoding: 'utf8' as const,
+              timeout: 30000,
+              env: {
+                ...process.env,
+                PYTHONWARNINGS: 'ignore::UserWarning,ignore::DeprecationWarning,ignore::FutureWarning',
+              },
+            }
+            execSync(`"${pyannotePath}" -c "from pyannote.audio import Pipeline" 2>&1`, pyannoteExecOptions)
             status.dualEnvironment.pyannoteReady = true
           } catch {
             status.dualEnvironment.pyannoteReady = false

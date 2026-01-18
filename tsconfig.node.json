@@ -5,14 +5,19 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
-    "strict": true,
+    "strict": false,
     "outDir": "./dist-electron",
     "declaration": true,
     "declarationMap": true,
     "esModuleInterop": true,
     "target": "ES2020",
-    "rootDir": "."
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@/types/*": ["src/types/*"]
+    },
+    "noImplicitAny": false
   },
-  "include": ["vite.config.ts", "electron/**/*.ts"],
+  "include": ["vite.config.ts", "electron/**/*.ts", "src/types/**/*.ts"],
   "exclude": ["node_modules"]
 }

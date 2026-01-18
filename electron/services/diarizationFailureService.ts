@@ -830,5 +830,4 @@ export const diarizationFailureService = {
   }
 }
 
-// Export types
-export type { DiarizationFailure, DiarizationFailureNotification, DiarizationPreference }
+// Note: Types are exported inline at their definitions above

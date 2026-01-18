@@ -156,6 +156,8 @@ export interface ExtractionProcessResult {
     llmResponseTimeMs?: number
     /** Meeting duration in milliseconds */
     meetingDurationMs?: number
+    /** Note generation mode used */
+    noteGenerationMode?: 'strict' | 'balanced' | 'loose'
   }
 }
 
@@ -598,7 +600,7 @@ function parseDecisionFromNote(note: MeetingNote): ExtractedDecision | null {
       confidence: 0.85, // Default confidence for stored decisions
       startTimeMs,
       endTimeMs,
-      sourceTranscriptIds: note.source_transcript_ids as string[] | undefined
+      sourceTranscriptIds: note.source_transcript_ids ? JSON.parse(note.source_transcript_ids) as string[] : undefined
     }
   } catch (error) {
     console.error('Failed to parse decision from note:', error)
@@ -643,7 +645,7 @@ function parseTopicFromNote(note: MeetingNote): ExtractedTopic | null {
       keyPoints: [],
       decisions,
       speakers,
-      sourceTranscriptIds: note.source_transcript_ids as string[] | undefined
+      sourceTranscriptIds: note.source_transcript_ids ? JSON.parse(note.source_transcript_ids) as string[] : undefined
     }
   } catch (error) {
     console.error('Failed to parse topic from note:', error)

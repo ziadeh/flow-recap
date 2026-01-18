@@ -706,5 +706,4 @@ export function resetTranscriptStatements(): void {
   statements = null
 }
 
-// Export types
-export type { CreateTranscriptWithSpeakerInput, TranscriptCreationOptions }
+// Note: Types are exported inline at their definitions above

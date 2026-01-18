@@ -362,7 +362,7 @@ app.whenReady().then(async () => {
     try {
       // Extract the file path from the URL
       // request.url will be something like "local-file:///path/to/file" or "local-file://path/to/file"
-      const urlString = typeof request.url === 'string' ? request.url : request.url.toString()
+      const urlString = request.url
       let filePath = urlString.replace(/^local-file:\/\//, '')
 
       // Strip query parameters (e.g., ?t=123456) used for cache busting
@@ -374,7 +374,7 @@ app.whenReady().then(async () => {
 
       // Decode URI components in the path
       // Split by '/', decode each segment, then rejoin
-      const segments = filePath.split('/').map(segment => {
+      const segments = filePath.split('/').map((segment: string) => {
         if (segment === '') {
           return segment // Empty segments from leading/trailing slashes
         }
@@ -543,7 +543,7 @@ app.whenReady().then(async () => {
       })
     } catch (error) {
       console.error('[Protocol Handler] Error loading audio file:', error)
-      console.error('[Protocol Handler] Request URL:', typeof request.url === 'string' ? request.url : request.url.toString())
+      console.error('[Protocol Handler] Request URL:', request.url)
       if (error instanceof Error) {
         console.error('[Protocol Handler] Error stack:', error.stack)
       }

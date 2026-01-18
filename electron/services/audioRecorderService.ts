@@ -600,7 +600,9 @@ function readWavFileSampleRate(filePath: string): number | null {
       return null;
     }
 
-    const buffer = fs.readFileSync(filePath, { start: 0, end: 44 });
+    // Read entire file and extract just the header (readFileSync doesn't support start/end options)
+    const fullBuffer = fs.readFileSync(filePath);
+    const buffer = fullBuffer.subarray(0, Math.min(44, fullBuffer.length));
     if (buffer.length < 44) {
       return null;
     }
@@ -2267,11 +2269,13 @@ export const audioRecorderService = {
       
       const errorMessage = err.message || String(err);
       // Check if this is a sox exit error (expected when stopping)
+      // Note: The early return at line 2266 already handles "stopping" status,
+      // so if we reach here, the status was "recording" or "paused" initially.
+      // However, the status might have changed concurrently, so we just log the error.
       if (errorMessage.includes("sox has exited with error code 1")) {
-        // If we're stopping, this is expected - ignore it
-        if (recordingState.status === "stopping") {
-          return;
-        }
+        // This is typically a normal exit when stopping, but if we reach here
+        // with a "recording" or "paused" status, we should continue to handle it
+        console.warn("Sox exited with error code 1 during recording");
       }
       
       console.error("Recording stream error:", err);

@@ -184,7 +184,9 @@ function getResourcesPath(): string {
  */
 function getBinariesPath(): string {
   const platform = process.platform
-  const arch = process.arch
+  // Cast to string to allow comparison with non-standard arch names
+  // (e.g., from environment variables or external sources)
+  const arch = process.arch as string
 
   // Normalize arch names
   let archDir: string
@@ -681,5 +683,4 @@ export const binaryManager = {
   }
 }
 
-// Export types for external use
-export type { BinaryManagerConfig, BinaryInfo, BinaryName }
+// Note: Types are exported inline at their definitions above

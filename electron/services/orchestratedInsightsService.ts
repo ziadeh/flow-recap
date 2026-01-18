@@ -504,7 +504,7 @@ function convertToMeetingNotes(
         is_ai_generated: true,
         created_during_recording: false,
         generation_timestamp: timestamp,
-        keywords: JSON.stringify(['key-takeaway'])
+        keywords: ['key-takeaway']
       })
     )
   })
@@ -533,7 +533,7 @@ function convertToMeetingNotes(
         is_ai_generated: true,
         created_during_recording: false,
         generation_timestamp: timestamp,
-        keywords: JSON.stringify([point.category])
+        keywords: [point.category]
       })
     )
   })
@@ -549,7 +549,7 @@ function convertToMeetingNotes(
         is_ai_generated: true,
         created_during_recording: false,
         generation_timestamp: timestamp,
-        keywords: JSON.stringify(topic.keywords)
+        keywords: topic.keywords
       })
     )
   })
@@ -734,14 +734,15 @@ class OrchestratedInsightsService {
           const llmPromise = llmRoutingService.chatCompletion({
             messages,
             temperature: mergedConfig.temperature,
-            max_tokens: mergedConfig.maxTokens
+            maxTokens: mergedConfig.maxTokens
           })
 
           this.emitProgress('extracting_insights', 'Extracting insights...', 40 + (retryCount * 10))
 
           const result = await Promise.race([llmPromise, timeoutPromise])
 
-          if (!result.success || !result.content) {
+          const responseContent = result.data?.choices?.[0]?.message?.content
+          if (!result.success || !responseContent) {
             throw new Error(result.error || 'LLM request failed')
           }
 
@@ -751,7 +752,7 @@ class OrchestratedInsightsService {
           let parsedData: any
           try {
             // Remove markdown code blocks if present
-            let content = result.content.trim()
+            let content = responseContent.trim()
             if (content.startsWith('```json')) {
               content = content.replace(/^```json\s*/, '').replace(/\s*```$/, '')
             } else if (content.startsWith('```')) {

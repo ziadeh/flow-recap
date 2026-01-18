@@ -19,6 +19,10 @@
 import path from 'path'
 import fs from 'fs'
 import type { Migration, MigrationRecord } from '../../src/types/database'
+import type BetterSqlite3 from 'better-sqlite3'
+
+// Type alias for the database instance
+type DatabaseInstance = BetterSqlite3.Database
 
 // ============================================================================
 // NATIVE MODULE LOADING
@@ -1128,7 +1132,7 @@ const migrations: Migration[] = [
 
 class DatabaseService {
   private static instance: DatabaseService | null = null
-  private db: Database.Database | null = null
+  private db: DatabaseInstance | null = null
   private dbPath: string = ''
 
   private constructor() {}
@@ -1153,7 +1157,7 @@ class DatabaseService {
   /**
    * Initialize the database connection and run migrations
    */
-  initialize(customPath?: string): Database.Database {
+  initialize(customPath?: string): DatabaseInstance {
     if (this.db) {
       return this.db
     }
@@ -1193,7 +1197,7 @@ class DatabaseService {
   /**
    * Get the database instance
    */
-  getDatabase(): Database.Database {
+  getDatabase(): DatabaseInstance {
     if (!this.db) {
       throw new Error('Database not initialized. Call initialize() first.')
     }

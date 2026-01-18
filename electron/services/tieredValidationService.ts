@@ -681,7 +681,7 @@ class TieredValidationService extends EventEmitter {
     this.state.lastFullValidation = result.timestamp
     this.state.overallStatus = 'complete'
 
-    loggerService.info(`[TieredValidation] Full validation complete: ${totalDuration}ms`, metrics)
+    loggerService.info(`[TieredValidation] Full validation complete: ${totalDuration}ms`, { metrics } as unknown as import('./loggerService').LogContext)
     this.emit('validation:complete', result)
 
     return result

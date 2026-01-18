@@ -371,10 +371,10 @@ function spawnPythonProcess(
 
     console.log(`[ML Pipeline ${jobId}] Spawning: ${pythonPath} ${scriptPath} ${args.join(' ')}`)
 
-    const process = spawn(pythonPath, [scriptPath, ...args], {
+    const childProcess = spawn(pythonPath, [scriptPath, ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
-        ...process.env,
+        ...globalThis.process.env,
         PYTHONUNBUFFERED: '1', // Force unbuffered output
         // PyTorch 2.6+ compatibility: disable weights_only enforcement for model loading
         // This is a fallback for models that contain pickled objects beyond what we allowlist
@@ -386,7 +386,7 @@ function spawnPythonProcess(
       }
     })
 
-    job.process = process
+    job.process = childProcess
     job.status = 'running'
 
     let stdout = ''
@@ -397,27 +397,27 @@ function spawnPythonProcess(
     if (timeout > 0) {
       timeoutId = setTimeout(() => {
         console.log(`[ML Pipeline ${jobId}] Process timeout after ${timeout}ms`)
-        process.kill('SIGTERM')
+        childProcess.kill('SIGTERM')
         setTimeout(() => {
-          if (!process.killed) {
-            process.kill('SIGKILL')
+          if (!childProcess.killed) {
+            childProcess.kill('SIGKILL')
           }
         }, 5000)
         reject(new Error(`Process timed out after ${timeout}ms`))
       }, timeout)
     }
 
-    process.stdout?.on('data', (data: Buffer) => {
+    childProcess.stdout?.on('data', (data: Buffer) => {
       stdout += data.toString()
     })
 
-    process.stderr?.on('data', (data: Buffer) => {
+    childProcess.stderr?.on('data', (data: Buffer) => {
       const text = data.toString()
       stderr += text
       parseProgressFromStderr(text, jobId, job.phase)
     })
 
-    process.on('exit', (code, signal) => {
+    childProcess.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
       if (timeoutId) {
         clearTimeout(timeoutId)
       }
@@ -441,7 +441,7 @@ function spawnPythonProcess(
       }
     })
 
-    process.on('error', (err) => {
+    childProcess.on('error', (err: Error) => {
       if (timeoutId) {
         clearTimeout(timeoutId)
       }

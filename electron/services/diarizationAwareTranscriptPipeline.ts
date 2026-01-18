@@ -621,13 +621,7 @@ export const diarizationAwareTranscriptPipeline = {
   }
 }
 
-// Export types
-export type {
-  DiarizationAwarePipelineStatus,
-  DiarizationAwarePipelineConfig,
-  DiarizationAwarePipelineProgress,
-  DiarizationAwarePipelineResult
-}
+// Note: Types are exported inline at their definitions above
 
 // Reset for testing
 export function resetDiarizationAwareTranscriptPipelineState(): void {

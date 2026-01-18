@@ -232,7 +232,7 @@ export type {
 export { streamingDiarizationService, resetStreamingDiarizationState } from './streamingDiarizationService'
 export type {
   StreamingDiarizationStatus,
-  StreamingDiarizationConfig,
+  StreamingDiarizationConfig as StreamingDiarizationServiceConfig,
   SpeakerSegment,
   SpeakerChangeEvent,
   StreamingDiarizationState,
@@ -629,9 +629,9 @@ export type {
   LegacyPathInfo,
   MigrationProgress,
   MigrationResult,
-  ValidationResult,
+  ValidationResult as MigrationValidationResult,
   RollbackResult,
-  CleanupResult,
+  CleanupResult as MigrationCleanupResult,
   MigrationStatus
 } from './dataMigrationService'
 
@@ -650,7 +650,7 @@ export type {
   ValidationCheckType,
   ValidationStatus,
   ValidationCheck,
-  ValidationResult,
+  ValidationResult as PythonValidationResult,
   AutoRepairResult,
   EnvironmentReadiness,
   CheckCriticality
