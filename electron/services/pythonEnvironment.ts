@@ -50,6 +50,7 @@ import { execSync, spawn, ChildProcess } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
 import { EventEmitter } from 'events'
+import { pathNormalizationService } from './pathNormalizationService'
 
 // Electron app is imported dynamically to support testing outside Electron context
 let app: { isPackaged?: boolean; getPath?: (name: string) => string } | undefined
@@ -179,6 +180,7 @@ class PythonEnvironmentService extends EventEmitter {
 
   /**
    * Get the base directory for Python resources
+   * Uses pathNormalizationService for cross-platform path handling
    */
   private getResourcesDir(): string {
     if (app?.isPackaged) {
@@ -186,39 +188,41 @@ class PythonEnvironmentService extends EventEmitter {
     }
     // In development, __dirname is dist-electron/ (after Vite bundling)
     // Go up one level to reach the project root
-    return path.join(__dirname, '..')
+    return pathNormalizationService.joinPaths(__dirname, '..')
   }
 
   /**
    * Get the Python scripts directory
+   * Uses pathNormalizationService for cross-platform path handling
    */
   getPythonScriptsDir(): string {
     const resourcesDir = this.getResourcesDir()
     if (app?.isPackaged) {
-      return path.join(resourcesDir, 'python')
+      return pathNormalizationService.joinPaths(resourcesDir, 'python')
     }
-    return path.join(resourcesDir, 'python')
+    return pathNormalizationService.joinPaths(resourcesDir, 'python')
   }
 
   /**
    * Check if bundled Python executable exists
+   * Uses pathNormalizationService for cross-platform path handling
    */
   private getBundlePath(): string | null {
     const pythonDir = this.getPythonScriptsDir()
     const bundleExe = process.platform === 'win32'
-      ? path.join(pythonDir, 'transcription_bundle.exe')
-      : path.join(pythonDir, 'transcription_bundle')
+      ? pathNormalizationService.joinPaths(pythonDir, 'transcription_bundle.exe')
+      : pathNormalizationService.joinPaths(pythonDir, 'transcription_bundle')
 
-    if (fs.existsSync(bundleExe)) {
+    if (pathNormalizationService.exists(bundleExe)) {
       return bundleExe
     }
 
     // Also check in _internal directory (PyInstaller structure)
     const internalBundleExe = process.platform === 'win32'
-      ? path.join(pythonDir, '_internal', 'transcription_bundle.exe')
-      : path.join(pythonDir, '_internal', 'transcription_bundle')
+      ? pathNormalizationService.joinPaths(pythonDir, '_internal', 'transcription_bundle.exe')
+      : pathNormalizationService.joinPaths(pythonDir, '_internal', 'transcription_bundle')
 
-    if (fs.existsSync(internalBundleExe)) {
+    if (pathNormalizationService.exists(internalBundleExe)) {
       return internalBundleExe
     }
 
@@ -227,6 +231,7 @@ class PythonEnvironmentService extends EventEmitter {
 
   /**
    * Find virtual environment Python executable
+   * Uses pathNormalizationService for cross-platform path handling
    * @param purpose - Optional: 'whisperx' for transcription, 'pyannote' for diarization
    */
   private findVenvPython(purpose?: PythonPurpose): string | null {
@@ -234,19 +239,19 @@ class PythonEnvironmentService extends EventEmitter {
 
     // Check for purpose-specific venvs first (dual environment setup)
     if (purpose === 'whisperx') {
-      const whisperxVenv = path.join(pythonDir, 'venv-whisperx')
+      const whisperxVenv = pathNormalizationService.joinPaths(pythonDir, 'venv-whisperx')
       const whisperxPython = process.platform === 'win32'
-        ? path.join(whisperxVenv, 'Scripts', 'python.exe')
-        : path.join(whisperxVenv, 'bin', 'python')
-      if (fs.existsSync(whisperxPython)) {
+        ? pathNormalizationService.joinPaths(whisperxVenv, 'Scripts', 'python.exe')
+        : pathNormalizationService.joinPaths(whisperxVenv, 'bin', 'python')
+      if (pathNormalizationService.exists(whisperxPython)) {
         return whisperxPython
       }
     } else if (purpose === 'pyannote') {
-      const pyannoteVenv = path.join(pythonDir, 'venv-pyannote')
+      const pyannoteVenv = pathNormalizationService.joinPaths(pythonDir, 'venv-pyannote')
       const pyannotePython = process.platform === 'win32'
-        ? path.join(pyannoteVenv, 'Scripts', 'python.exe')
-        : path.join(pyannoteVenv, 'bin', 'python')
-      if (fs.existsSync(pyannotePython)) {
+        ? pathNormalizationService.joinPaths(pyannoteVenv, 'Scripts', 'python.exe')
+        : pathNormalizationService.joinPaths(pyannoteVenv, 'bin', 'python')
+      if (pathNormalizationService.exists(pyannotePython)) {
         return pyannotePython
       }
     }
@@ -254,19 +259,19 @@ class PythonEnvironmentService extends EventEmitter {
     // When no purpose specified, check for dual venvs (whisperx/pyannote)
     // This ensures validation checks find the venvs
     if (!purpose) {
-      const whisperxVenv = path.join(pythonDir, 'venv-whisperx')
+      const whisperxVenv = pathNormalizationService.joinPaths(pythonDir, 'venv-whisperx')
       const whisperxPython = process.platform === 'win32'
-        ? path.join(whisperxVenv, 'Scripts', 'python.exe')
-        : path.join(whisperxVenv, 'bin', 'python')
-      if (fs.existsSync(whisperxPython)) {
+        ? pathNormalizationService.joinPaths(whisperxVenv, 'Scripts', 'python.exe')
+        : pathNormalizationService.joinPaths(whisperxVenv, 'bin', 'python')
+      if (pathNormalizationService.exists(whisperxPython)) {
         return whisperxPython
       }
 
-      const pyannoteVenv = path.join(pythonDir, 'venv-pyannote')
+      const pyannoteVenv = pathNormalizationService.joinPaths(pythonDir, 'venv-pyannote')
       const pyannotePython = process.platform === 'win32'
-        ? path.join(pyannoteVenv, 'Scripts', 'python.exe')
-        : path.join(pyannoteVenv, 'bin', 'python')
-      if (fs.existsSync(pyannotePython)) {
+        ? pathNormalizationService.joinPaths(pyannoteVenv, 'Scripts', 'python.exe')
+        : pathNormalizationService.joinPaths(pyannoteVenv, 'bin', 'python')
+      if (pathNormalizationService.exists(pyannotePython)) {
         return pyannotePython
       }
     }
@@ -275,12 +280,12 @@ class PythonEnvironmentService extends EventEmitter {
     const venvDirs = ['venv-3.12', 'venv']
 
     for (const venvName of venvDirs) {
-      const venvPath = path.join(pythonDir, venvName)
+      const venvPath = pathNormalizationService.joinPaths(pythonDir, venvName)
       const pythonExe = process.platform === 'win32'
-        ? path.join(venvPath, 'Scripts', 'python.exe')
-        : path.join(venvPath, 'bin', 'python')
+        ? pathNormalizationService.joinPaths(venvPath, 'Scripts', 'python.exe')
+        : pathNormalizationService.joinPaths(venvPath, 'bin', 'python')
 
-      if (fs.existsSync(pythonExe)) {
+      if (pathNormalizationService.exists(pythonExe)) {
         return pythonExe
       }
     }
@@ -290,16 +295,17 @@ class PythonEnvironmentService extends EventEmitter {
 
   /**
    * Check if dual virtual environment setup is available
+   * Uses pathNormalizationService for cross-platform path handling
    */
   private isDualVenvAvailable(): boolean {
     const pythonDir = this.getPythonScriptsDir()
     const whisperxVenv = process.platform === 'win32'
-      ? path.join(pythonDir, 'venv-whisperx', 'Scripts', 'python.exe')
-      : path.join(pythonDir, 'venv-whisperx', 'bin', 'python')
+      ? pathNormalizationService.joinPaths(pythonDir, 'venv-whisperx', 'Scripts', 'python.exe')
+      : pathNormalizationService.joinPaths(pythonDir, 'venv-whisperx', 'bin', 'python')
     const pyannoteVenv = process.platform === 'win32'
-      ? path.join(pythonDir, 'venv-pyannote', 'Scripts', 'python.exe')
-      : path.join(pythonDir, 'venv-pyannote', 'bin', 'python')
-    return fs.existsSync(whisperxVenv) && fs.existsSync(pyannoteVenv)
+      ? pathNormalizationService.joinPaths(pythonDir, 'venv-pyannote', 'Scripts', 'python.exe')
+      : pathNormalizationService.joinPaths(pythonDir, 'venv-pyannote', 'bin', 'python')
+    return pathNormalizationService.exists(whisperxVenv) && pathNormalizationService.exists(pyannoteVenv)
   }
 
   /**
@@ -311,26 +317,56 @@ class PythonEnvironmentService extends EventEmitter {
       return process.env.PYTHON_PATH
     }
 
-    // Try to find python3 or python
-    try {
-      const pythonPath = execSync('which python3 2>/dev/null || which python 2>/dev/null', {
-        encoding: 'utf8',
-        timeout: 5000,
-      }).trim()
-      if (pythonPath && fs.existsSync(pythonPath)) {
-        return pythonPath
-      }
-    } catch {
-      // Ignore errors
-    }
-
-    // Windows fallback
+    // Platform-specific Python detection
     if (process.platform === 'win32') {
+      // Windows: Use 'where' command and py launcher
+      try {
+        // Try py launcher first (recommended for Windows)
+        const pyPath = execSync('where py', {
+          encoding: 'utf8',
+          timeout: 5000,
+          stdio: ['pipe', 'pipe', 'pipe']
+        }).trim().split('\n')[0]
+        if (pyPath && fs.existsSync(pyPath)) {
+          return pyPath
+        }
+      } catch {
+        // py launcher not found, try python directly
+      }
+
       try {
         const pythonPath = execSync('where python', {
           encoding: 'utf8',
           timeout: 5000,
+          stdio: ['pipe', 'pipe', 'pipe']
         }).trim().split('\n')[0]
+        if (pythonPath && fs.existsSync(pythonPath)) {
+          return pythonPath
+        }
+      } catch {
+        // Ignore errors
+      }
+    } else {
+      // Unix: Use 'which' command
+      try {
+        const pythonPath = execSync('which python3', {
+          encoding: 'utf8',
+          timeout: 5000,
+          stdio: ['pipe', 'pipe', 'pipe']
+        }).trim()
+        if (pythonPath && fs.existsSync(pythonPath)) {
+          return pythonPath
+        }
+      } catch {
+        // python3 not found, try python
+      }
+
+      try {
+        const pythonPath = execSync('which python', {
+          encoding: 'utf8',
+          timeout: 5000,
+          stdio: ['pipe', 'pipe', 'pipe']
+        }).trim()
         if (pythonPath && fs.existsSync(pythonPath)) {
           return pythonPath
         }
@@ -539,12 +575,21 @@ class PythonEnvironmentService extends EventEmitter {
         const pyannotePath = status.dualEnvironment.pyannotePath
 
         // Check if site-packages exist (lightweight filesystem check)
-        const whisperxSitePackages = whisperxPath
-          ? path.join(path.dirname(path.dirname(whisperxPath)), 'lib', `python${status.version?.split('.').slice(0, 2).join('.') || '3.12'}`, 'site-packages')
-          : null
-        const pyannoteSitePackages = pyannotePath
-          ? path.join(path.dirname(path.dirname(pyannotePath)), 'lib', `python${status.version?.split('.').slice(0, 2).join('.') || '3.12'}`, 'site-packages')
-          : null
+        // Note: Windows uses Lib/site-packages, Unix uses lib/pythonX.Y/site-packages
+        const getSitePackagesPath = (pythonExePath: string): string => {
+          const venvRoot = path.dirname(path.dirname(pythonExePath))
+          if (process.platform === 'win32') {
+            // Windows: venv/Lib/site-packages
+            return path.join(venvRoot, 'Lib', 'site-packages')
+          } else {
+            // Unix: venv/lib/pythonX.Y/site-packages
+            const pythonVersion = status.version?.split('.').slice(0, 2).join('.') || '3.12'
+            return path.join(venvRoot, 'lib', `python${pythonVersion}`, 'site-packages')
+          }
+        }
+
+        const whisperxSitePackages = whisperxPath ? getSitePackagesPath(whisperxPath) : null
+        const pyannoteSitePackages = pyannotePath ? getSitePackagesPath(pyannotePath) : null
 
         // Assume packages are available if site-packages directories exist
         if (whisperxSitePackages && fs.existsSync(whisperxSitePackages)) {

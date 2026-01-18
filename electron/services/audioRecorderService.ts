@@ -24,6 +24,7 @@ import { AudioMixer } from "./audioMixer";
 import { RealTimeWavWriter } from "./realTimeWavWriter";
 import { Readable } from "stream";
 import { binaryManager } from "./binaryManager";
+import { pathNormalizationService } from "./pathNormalizationService";
 
 const execAsync = promisify(exec);
 
@@ -144,6 +145,7 @@ const NO_AUDIO_DATA_WARNING_THRESHOLD_MS = 10000; // Warn if no data for 10 seco
 
 /**
  * Get the recordings directory path from settings or use default
+ * Uses pathNormalizationService for cross-platform path handling
  */
 function getRecordingsDir(): string {
   // Try to get custom path from settings
@@ -152,35 +154,43 @@ function getRecordingsDir(): string {
   // If not set, use default path
   if (!recordingsDir) {
     const userDataPath = app.getPath("userData");
-    recordingsDir = path.join(userDataPath, "recordings");
+    recordingsDir = pathNormalizationService.joinPaths(userDataPath, "recordings");
 
-    // Save default path to settings for future use
+    // Save default path to settings for future use (normalized for storage)
     try {
-      settingsService.set("storage.recordingsPath", recordingsDir, "storage");
+      const normalizedPath = pathNormalizationService.normalizeForStorage(recordingsDir);
+      settingsService.set("storage.recordingsPath", normalizedPath, "storage");
     } catch (err) {
       console.warn("Failed to save default recordings path to settings:", err);
     }
+  } else {
+    // Convert stored path to platform-specific format
+    recordingsDir = pathNormalizationService.toPlatformPath(recordingsDir);
   }
 
-  // Ensure directory exists
-  if (!fs.existsSync(recordingsDir)) {
-    fs.mkdirSync(recordingsDir, { recursive: true });
-  }
+  // Ensure directory exists using pathNormalizationService
+  pathNormalizationService.ensureDirectory(recordingsDir);
 
   return recordingsDir;
 }
 
 /**
  * Sanitize a string to be safe for use as a folder name
+ * Uses pathNormalizationService for cross-platform safety
  * Removes or replaces invalid characters and limits length
  */
 function sanitizeFolderName(name: string, maxLength: number = 100): string {
-  // Replace invalid characters with hyphens
-  let sanitized = name
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-") // Replace invalid filesystem characters
-    .replace(/\s+/g, "-") // Replace spaces with hyphens
-    .replace(/-+/g, "-") // Replace multiple hyphens with single hyphen
-    .replace(/^-+|-+$/g, ""); // Remove leading/trailing hyphens
+  // Use pathNormalizationService for sanitization which handles all platforms
+  let sanitized = pathNormalizationService.sanitizeFilename(name, "-");
+
+  // Replace spaces with hyphens for readability
+  sanitized = sanitized.replace(/\s+/g, "-");
+
+  // Replace multiple hyphens with single hyphen
+  sanitized = sanitized.replace(/-+/g, "-");
+
+  // Remove leading/trailing hyphens
+  sanitized = sanitized.replace(/^-+|-+$/g, "");
 
   // Truncate if too long
   if (sanitized.length > maxLength) {

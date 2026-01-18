@@ -26,6 +26,7 @@ import { EventEmitter } from 'events'
 import { pythonEnvironment, PythonEnvironmentType } from './pythonEnvironment'
 import { loggerService } from './loggerService'
 import { pythonValidationCacheService } from './pythonValidationCacheService'
+import { windowsPythonDiagnostics, WindowsDiagnosticsResult } from './windowsPythonDiagnostics'
 
 // ============================================================================
 // Types
@@ -42,6 +43,7 @@ export type ValidationCheckType =
   | 'env_propagation'
   | 'dual_environment'
   | 'torch_version'
+  | 'windows_diagnostics'
 
 export type ValidationStatus = 'pass' | 'fail' | 'warning' | 'skipped'
 
@@ -150,6 +152,8 @@ export interface ValidationResult {
     /** Whether lightweight validation was used */
     lightweightValidation?: boolean
   }
+  /** Windows-specific diagnostics (only present on Windows) */
+  windowsDiagnostics?: WindowsDiagnosticsResult
 }
 
 export interface AutoRepairResult {
@@ -391,6 +395,14 @@ class PythonEnvironmentValidatorService extends EventEmitter {
     // Check 9: Dual environment validation (for torch version conflicts)
     checks.push(await this.checkDualEnvironment())
 
+    // Check 10: Windows-specific diagnostics (only on Windows)
+    let windowsDiagnosticsResult: WindowsDiagnosticsResult | undefined
+    if (process.platform === 'win32') {
+      const windowsCheck = await this.checkWindowsDiagnostics()
+      checks.push(windowsCheck)
+      windowsDiagnosticsResult = windowsCheck.details?.windowsDiagnostics as WindowsDiagnosticsResult | undefined
+    }
+
     // Calculate summary with criticality breakdown
     const criticalFailed = checks.filter((c) => c.status === 'fail' && c.criticality === 'critical').length
     const importantFailed = checks.filter((c) => c.status === 'fail' && c.criticality === 'important').length
@@ -521,7 +533,9 @@ class PythonEnvironmentValidatorService extends EventEmitter {
       cacheInfo: {
         fromCache: false,
         lightweightValidation: false
-      }
+      },
+      // Include Windows-specific diagnostics if available
+      windowsDiagnostics: windowsDiagnosticsResult,
     }
 
     // Cache result in-memory
@@ -1465,6 +1479,97 @@ class PythonEnvironmentValidatorService extends EventEmitter {
   }
 
   /**
+   * Check 10: Windows-specific diagnostics
+   * Runs comprehensive Windows diagnostics for Python environment issues
+   */
+  private async checkWindowsDiagnostics(): Promise<ValidationCheck> {
+    const startTime = Date.now()
+    const check: ValidationCheck = {
+      type: 'windows_diagnostics',
+      name: 'Windows Python Environment Diagnostics',
+      status: 'pass',
+      message: '',
+      duration: 0,
+      criticality: 'important', // Important - Windows-specific issues can break Python
+    }
+
+    try {
+      // Run Windows-specific diagnostics
+      const diagnostics = await windowsPythonDiagnostics.runDiagnostics()
+
+      check.details = {
+        windowsDiagnostics: diagnostics,
+        windowsVersion: diagnostics.windowsVersion,
+        pythonInstallation: diagnostics.pythonInstallation,
+        visualCppInstalled: diagnostics.visualCpp.installed,
+        longPathsEnabled: diagnostics.pathInfo.longPathsEnabled,
+        executionPolicy: diagnostics.executionPolicy.policy,
+        cudaAvailable: diagnostics.cuda.nvidiaDriverInstalled,
+      }
+
+      // Determine check status based on diagnostics health
+      if (diagnostics.overallHealth === 'failed') {
+        check.status = 'fail'
+        check.message = `Windows environment has critical issues: ${diagnostics.issues.filter(i => i.severity === 'critical').map(i => i.message).join('; ')}`
+        check.error = diagnostics.issues.filter(i => i.severity === 'critical').map(i => i.details || i.message).join('; ')
+        check.remediation = diagnostics.allRemediationSteps
+      } else if (diagnostics.overallHealth === 'degraded') {
+        check.status = 'warning'
+        check.message = `Windows environment has some issues: ${diagnostics.issues.filter(i => i.severity === 'warning').map(i => i.message).join('; ')}`
+        check.remediation = diagnostics.allRemediationSteps
+      } else {
+        check.status = 'pass'
+        check.message = 'Windows environment diagnostics passed'
+        if (!diagnostics.pythonInstallation.isValid) {
+          check.status = 'fail'
+          check.message = 'Python 3.12+ not found on Windows'
+          check.remediation = [
+            'Download Python 3.12 from https://www.python.org/downloads/',
+            'Run the installer and CHECK "Add Python to PATH"',
+            'Restart your terminal/command prompt after installation',
+          ]
+        }
+      }
+
+      // Add Visual C++ specific warnings
+      if (!diagnostics.visualCpp.installed) {
+        if (check.status === 'pass') {
+          check.status = 'warning'
+          check.message = 'Visual C++ Redistributable not detected'
+        }
+        check.remediation = check.remediation || []
+        check.remediation.push(
+          'Download Visual C++ Redistributable from:',
+          'https://aka.ms/vs/17/release/vc_redist.x64.exe',
+          'This is required for PyTorch and other Python packages'
+        )
+      }
+
+      // Add path length warnings
+      if (diagnostics.pathInfo.hasLongPaths && !diagnostics.pathInfo.longPathsEnabled) {
+        if (check.status === 'pass') {
+          check.status = 'warning'
+          check.message = 'Long path issues detected'
+        }
+        check.remediation = check.remediation || []
+        check.remediation.push(
+          'Enable long path support in Windows:',
+          'Run PowerShell as Administrator: New-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force'
+        )
+      }
+
+      check.duration = Date.now() - startTime
+      return check
+    } catch (error) {
+      check.status = 'warning'
+      check.message = 'Failed to run Windows diagnostics'
+      check.error = error instanceof Error ? error.message : String(error)
+      check.duration = Date.now() - startTime
+      return check
+    }
+  }
+
+  /**
    * Get sanitized environment variables (hide sensitive data)
    */
   private getSanitizedEnvVars(): Record<string, string> {
@@ -1815,6 +1920,55 @@ class PythonEnvironmentValidatorService extends EventEmitter {
    */
   stopVenvWatchers(): void {
     pythonValidationCacheService.stopWatching()
+  }
+
+  /**
+   * Run Windows-specific diagnostics independently
+   * This can be called to get detailed Windows diagnostics without running
+   * full validation
+   */
+  async runWindowsDiagnostics(): Promise<WindowsDiagnosticsResult | null> {
+    if (process.platform !== 'win32') {
+      loggerService.info('[PythonValidator] Windows diagnostics skipped - not on Windows')
+      return null
+    }
+
+    try {
+      return await windowsPythonDiagnostics.runDiagnostics()
+    } catch (error) {
+      loggerService.error('[PythonValidator] Failed to run Windows diagnostics', error)
+      return null
+    }
+  }
+
+  /**
+   * Get Windows diagnostics report as text
+   * Useful for displaying to users or saving to files
+   */
+  async getWindowsDiagnosticsReport(): Promise<string | null> {
+    const diagnostics = await this.runWindowsDiagnostics()
+    if (!diagnostics) {
+      return null
+    }
+    return windowsPythonDiagnostics.generateReport(diagnostics)
+  }
+
+  /**
+   * Get Windows-specific troubleshooting guide for an issue
+   */
+  getWindowsTroubleshootingGuide(category: 'python' | 'visual_cpp' | 'path' | 'execution_policy' | 'subprocess' | 'cuda'): string | null {
+    if (process.platform !== 'win32') {
+      return null
+    }
+
+    const fakeIssue = {
+      category,
+      severity: 'warning' as const,
+      message: '',
+      remediation: [],
+    }
+
+    return windowsPythonDiagnostics.getTroubleshootingGuide(fakeIssue)
   }
 }
 

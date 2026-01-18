@@ -23,6 +23,17 @@ import { app } from 'electron'
 import { audioRecorderService } from './audioRecorderService'
 import { settingsService } from './settingsService'
 
+// Lazy import to avoid circular dependency
+let windowsAudioService: typeof import('./windowsAudioCompatibilityService').windowsAudioCompatibilityService | null = null
+
+async function getWindowsAudioService() {
+  if (!windowsAudioService && process.platform === 'win32') {
+    const module = await import('./windowsAudioCompatibilityService')
+    windowsAudioService = module.windowsAudioCompatibilityService
+  }
+  return windowsAudioService
+}
+
 const execAsync = promisify(exec)
 
 // ============================================================================
@@ -1008,5 +1019,72 @@ Then use pavucontrol to route audio from your meeting app to the virtual sink.`
           message: 'Unable to auto-fix this issue. Please check the troubleshooting suggestions.'
         }
     }
+  },
+
+  /**
+   * Run comprehensive Windows-specific audio diagnostics
+   * Returns enhanced diagnostics including driver info, exclusive mode detection, and more
+   */
+  async runWindowsDiagnostics(): Promise<import('./windowsAudioCompatibilityService').WindowsAudioDiagnostics | null> {
+    if (process.platform !== 'win32') {
+      return null
+    }
+
+    try {
+      const windowsService = await getWindowsAudioService()
+      if (windowsService) {
+        return await windowsService.runDiagnostics()
+      }
+    } catch (error) {
+      console.error('Error running Windows audio diagnostics:', error)
+    }
+    return null
+  },
+
+  /**
+   * Get Windows audio quick status (for quick checks)
+   */
+  async getWindowsQuickStatus(): Promise<{
+    status: 'ok' | 'warning' | 'error'
+    message: string
+    canRecord: boolean
+  } | null> {
+    if (process.platform !== 'win32') {
+      return null
+    }
+
+    try {
+      const windowsService = await getWindowsAudioService()
+      if (windowsService) {
+        return await windowsService.getQuickStatus()
+      }
+    } catch (error) {
+      console.error('Error getting Windows audio quick status:', error)
+    }
+    return null
+  },
+
+  /**
+   * Start recording with Windows fallback mechanism
+   * Tries multiple recording methods (sox, ffmpeg, etc.) if the primary fails
+   */
+  async startWindowsRecordingWithFallback(
+    outputPath: string,
+    deviceName: string,
+    sampleRate: number = 16000
+  ): Promise<import('./windowsAudioCompatibilityService').WindowsRecordingFallbackResult | null> {
+    if (process.platform !== 'win32') {
+      return null
+    }
+
+    try {
+      const windowsService = await getWindowsAudioService()
+      if (windowsService) {
+        return await windowsService.tryRecordingWithFallback(outputPath, deviceName, sampleRate)
+      }
+    } catch (error) {
+      console.error('Error starting Windows recording with fallback:', error)
+    }
+    return null
   }
 }

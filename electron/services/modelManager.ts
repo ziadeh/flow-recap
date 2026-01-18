@@ -26,6 +26,7 @@ import * as path from 'path'
 import { spawn, execSync, ChildProcess } from 'child_process'
 import * as crypto from 'crypto'
 import * as readline from 'readline'
+import { pathNormalizationService } from './pathNormalizationService'
 
 // Electron app is imported dynamically to support testing outside Electron context
 let app: { isPackaged?: boolean; getPath?: (name: string) => string } | undefined
@@ -245,6 +246,7 @@ class ModelManagerService extends EventEmitter {
 
   /**
    * Get the bundled models directory (for packaged apps)
+   * Uses pathNormalizationService for cross-platform path handling
    */
   private getBundledModelsDirectory(): string | null {
     if (!app?.isPackaged) {
@@ -254,8 +256,8 @@ class ModelManagerService extends EventEmitter {
     // Check for bundled models in resources directory
     const resourcesPath = process.resourcesPath
     if (resourcesPath) {
-      const bundledPath = path.join(resourcesPath, 'models')
-      if (fs.existsSync(bundledPath)) {
+      const bundledPath = pathNormalizationService.joinPaths(resourcesPath, 'models')
+      if (pathNormalizationService.exists(bundledPath)) {
         console.log('[ModelManager] Found bundled models at:', bundledPath)
         return bundledPath
       }
@@ -266,30 +268,30 @@ class ModelManagerService extends EventEmitter {
 
   /**
    * Get the models directory path
+   * Uses pathNormalizationService for cross-platform path handling
    */
   private getModelsDirectory(): string {
     if (app?.getPath) {
       const appDataPath = app.getPath('userData')
-      return path.join(appDataPath, 'models')
+      return pathNormalizationService.joinPaths(appDataPath, 'models')
     }
 
     // Fallback for non-Electron context or testing
     if (process.platform === 'darwin') {
-      return path.join(process.env.HOME || '', 'Library', 'Application Support', 'Meeting Notes', 'models')
+      return pathNormalizationService.joinPaths(process.env.HOME || '', 'Library', 'Application Support', 'Meeting Notes', 'models')
     } else if (process.platform === 'win32') {
-      return path.join(process.env.APPDATA || '', 'Meeting Notes', 'models')
+      return pathNormalizationService.joinPaths(process.env.APPDATA || '', 'Meeting Notes', 'models')
     } else {
-      return path.join(process.env.HOME || '', '.config', 'meeting-notes', 'models')
+      return pathNormalizationService.joinPaths(process.env.HOME || '', '.config', 'meeting-notes', 'models')
     }
   }
 
   /**
    * Ensure the models directory exists
+   * Uses pathNormalizationService for cross-platform path handling
    */
   private ensureModelsDirectory(): void {
-    if (!fs.existsSync(this.modelsDir)) {
-      fs.mkdirSync(this.modelsDir, { recursive: true })
-    }
+    pathNormalizationService.ensureDirectory(this.modelsDir)
   }
 
   /**
@@ -606,30 +608,32 @@ class ModelManagerService extends EventEmitter {
   /**
    * Get the HuggingFace cache directory
    * Models downloaded by HuggingFace Hub are stored here
+   * Uses pathNormalizationService for cross-platform path handling
    */
   getHuggingFaceCacheDir(): string {
     // Check environment variable first
     if (process.env.HF_HOME) {
-      return process.env.HF_HOME
+      return pathNormalizationService.normalizePath(process.env.HF_HOME)
     }
     if (process.env.HUGGINGFACE_HUB_CACHE) {
-      return process.env.HUGGINGFACE_HUB_CACHE
+      return pathNormalizationService.normalizePath(process.env.HUGGINGFACE_HUB_CACHE)
     }
 
-    // Default locations
+    // Default locations using pathNormalizationService
     if (process.platform === 'win32') {
-      return path.join(process.env.USERPROFILE || '', '.cache', 'huggingface')
+      return pathNormalizationService.joinPaths(process.env.USERPROFILE || '', '.cache', 'huggingface')
     } else {
-      return path.join(process.env.HOME || '', '.cache', 'huggingface')
+      return pathNormalizationService.joinPaths(process.env.HOME || '', '.cache', 'huggingface')
     }
   }
 
   /**
    * Get the WhisperX/faster-whisper model cache directory
+   * Uses pathNormalizationService for cross-platform path handling
    */
   getWhisperCacheDir(): string {
     // WhisperX uses HuggingFace Hub for model downloads
-    return path.join(this.getHuggingFaceCacheDir(), 'hub')
+    return pathNormalizationService.joinPaths(this.getHuggingFaceCacheDir(), 'hub')
   }
 
   /**

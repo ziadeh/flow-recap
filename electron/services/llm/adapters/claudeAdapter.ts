@@ -275,22 +275,34 @@ export class ClaudeAdapter implements ILLMProvider {
    */
   private getEnhancedPath(): string {
     const currentPath = process.env.PATH || ''
-    const additionalPaths = [
-      '/opt/homebrew/bin',
-      '/opt/homebrew/sbin',
-      '/usr/local/bin',
-      '/usr/local/sbin',
-      path.join(os.homedir(), '.npm-global', 'bin'),
-      path.join(os.homedir(), 'bin'),
-      path.join(os.homedir(), '.local', 'bin'),
-    ]
+    // Use platform-specific PATH separator
+    const separator = process.platform === 'win32' ? ';' : ':'
+
+    // Platform-specific additional paths
+    const additionalPaths = process.platform === 'win32'
+      ? [
+          // Windows paths
+          path.join(process.env.APPDATA || '', 'npm'),
+          path.join(process.env.LOCALAPPDATA || '', 'Programs', 'cursor-agent'),
+          path.join(os.homedir(), '.local', 'bin'),
+        ]
+      : [
+          // Unix paths
+          '/opt/homebrew/bin',
+          '/opt/homebrew/sbin',
+          '/usr/local/bin',
+          '/usr/local/sbin',
+          path.join(os.homedir(), '.npm-global', 'bin'),
+          path.join(os.homedir(), 'bin'),
+          path.join(os.homedir(), '.local', 'bin'),
+        ]
 
     // Add paths that don't already exist in PATH
-    const pathSet = new Set(currentPath.split(':'))
+    const pathSet = new Set(currentPath.split(separator))
     const newPaths = additionalPaths.filter(p => !pathSet.has(p))
 
     if (newPaths.length > 0) {
-      return [...newPaths, currentPath].join(':')
+      return [...newPaths, currentPath].join(separator)
     }
     return currentPath
   }

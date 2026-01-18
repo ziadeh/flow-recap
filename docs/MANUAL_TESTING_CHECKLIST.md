@@ -359,13 +359,119 @@ This document provides a comprehensive manual testing checklist for QA testing o
 
 ### Windows-Specific
 
+#### Installation Scenarios
+
+##### Scenario 1: Fresh Install (No Python)
+- [ ] Install on clean Windows with no Python installed
+- [ ] App detects missing Python
+- [ ] App provides guidance for Python installation
+- [ ] After Python install, app detects it correctly
+- [ ] Python environment setup completes
+
+##### Scenario 2: Existing Python 3.12
+- [ ] Install on Windows with Python 3.12 already present
+- [ ] App detects existing Python 3.12 via py launcher
+- [ ] App detects existing Python 3.12 via `python` command
+- [ ] Virtual environment creation succeeds
+- [ ] No conflicts with existing packages
+
+##### Scenario 3: Conflicting Python Packages
+- [ ] Install on Windows with torch/numpy globally installed
+- [ ] Venv isolation works correctly
+- [ ] App uses venv packages, not global
+- [ ] No DLL loading conflicts
+
+##### Scenario 4: Non-ASCII Username
+- [ ] Create Windows user with Unicode characters (e.g., "Tëst Üsér")
+- [ ] Install and run app as this user
+- [ ] Paths with Unicode handled correctly
+- [ ] Database saves to Unicode path
+- [ ] Audio files save to Unicode path
+
+##### Scenario 5: Network Drive Installation
+- [ ] Map network drive (or use \\\\localhost\\C$)
+- [ ] Install app to network location
+- [ ] App launches from network path
+- [ ] UNC paths handled correctly
+- [ ] Performance acceptable over network
+
+#### NSIS Installer Testing
+- [ ] Installer (.exe) downloads successfully
+- [ ] Installer runs without admin rights (per-user install)
+- [ ] Installation directory can be changed
+- [ ] Desktop shortcut created and works
+- [ ] Start menu shortcut created and works
+- [ ] Shortcut icon displays correctly
+- [ ] App launches after installation
+- [ ] No missing DLL errors
+- [ ] VB-Audio driver installation option appears
+- [ ] VB-Audio can be installed optionally
+- [ ] VB-Audio can be skipped
+- [ ] Uninstaller appears in Programs and Features
+- [ ] Uninstaller removes all files
+- [ ] Uninstaller removes registry entries
+- [ ] Uninstaller removes shortcuts
+
+#### Python Environment Testing
+- [ ] Python detection via `py` launcher works
+- [ ] Python detection via `python` command works
+- [ ] Python 3.12 specifically detected
+- [ ] Venv created in correct location (AppData/Local)
+- [ ] Venv uses `Scripts` directory (not `bin`)
+- [ ] Venv uses `Lib/site-packages` (not `lib/pythonX.Y`)
+- [ ] pip works in venv
+- [ ] PyTorch installs correctly
+- [ ] WhisperX installs correctly
+- [ ] PyAnnote installs correctly
+- [ ] HuggingFace token configuration works
+- [ ] Model downloads complete
+
+#### Audio Device Testing (Windows)
+- [ ] Windows Audio service running
+- [ ] Audio devices enumerated via WASAPI
+- [ ] Microphone devices listed
+- [ ] System audio devices listed
+- [ ] Default device selected correctly
+- [ ] Device hot-plug handled
+- [ ] VB-Audio Virtual Cable detected (if installed)
+- [ ] System audio capture works with VB-Audio
+- [ ] Sox binary executes correctly
+- [ ] FFmpeg binary executes correctly
+- [ ] No DLL missing errors for audio binaries
+
+#### Windows Integration
 - [ ] Start menu integration
 - [ ] System tray icon (if applicable)
 - [ ] Windows notifications work
 - [ ] File associations (if any)
 - [ ] Registry entries correct
-- [ ] Works on Windows 10
+- [ ] Works on Windows 10 (build 1903+)
 - [ ] Works on Windows 11
+- [ ] High DPI scaling works
+- [ ] Dark mode respects Windows theme
+
+#### Claude CLI Integration (Windows)
+- [ ] Claude CLI detected in %APPDATA%\\npm
+- [ ] Claude CLI detected via PATH
+- [ ] `claude.cmd` wrapper works
+- [ ] PATH separator uses semicolon (;)
+- [ ] Shell profile not loaded (Windows doesn't use .bashrc)
+
+#### Path Handling
+- [ ] Backslash separators work
+- [ ] Forward slash separators work (normalized)
+- [ ] Paths with spaces work
+- [ ] Long paths (>260 chars) work (if enabled)
+- [ ] Drive letters handled correctly
+- [ ] Relative paths resolved correctly
+
+#### Performance (Windows)
+- [ ] Startup time: _____ seconds
+- [ ] Memory usage at idle: _____ MB
+- [ ] CPU usage at idle: _____ %
+- [ ] Recording doesn't spike CPU
+- [ ] No memory leaks over time
+- [ ] Database operations responsive
 
 ### Linux-Specific
 
@@ -395,8 +501,15 @@ This document provides a comprehensive manual testing checklist for QA testing o
 | Issue | Workaround | Status |
 |-------|------------|--------|
 | SmartScreen warning for unsigned builds | Click "More info" > "Run anyway" | Expected for dev builds |
-| Missing Visual C++ Runtime | Install VC++ Redistributable | May require manual install |
-| Audio device not detected | Update audio drivers | Driver issue |
+| Missing Visual C++ Runtime | Install VC++ Redistributable 2015-2022 | May require manual install |
+| Audio device not detected | Update audio drivers or restart Audiosrv service | Driver issue |
+| Python not detected | Install Python 3.12 with py launcher | User action required |
+| Venv creation fails | Check disk space, run as admin once | Permission issue |
+| Sox DLL errors | Verify all sox DLLs bundled (13+ files) | Build issue |
+| Long path errors | Enable long paths in registry | Windows limitation |
+| Claude CLI not found | Install via `npm i -g @anthropic-ai/claude-code` | User action required |
+| PATH too long | Remove unused entries from PATH | System limitation |
+| Non-ASCII path issues | Use ASCII-only paths or enable Unicode support | Windows limitation |
 
 ### Linux
 

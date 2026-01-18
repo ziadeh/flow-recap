@@ -20,6 +20,7 @@ import path from 'path'
 import fs from 'fs'
 import type { Migration, MigrationRecord } from '../../src/types/database'
 import type BetterSqlite3 from 'better-sqlite3'
+import { pathNormalizationService } from './pathNormalizationService'
 
 // Type alias for the database instance
 type DatabaseInstance = BetterSqlite3.Database
@@ -1164,20 +1165,19 @@ class DatabaseService {
 
     // Determine database path
     if (customPath) {
-      this.dbPath = customPath
+      // Normalize custom path for the current platform
+      this.dbPath = pathNormalizationService.normalizePath(customPath)
     } else {
       if (!app) {
         throw new Error('Electron app not available. Provide a customPath for database initialization.')
       }
       const userDataPath = app.getPath('userData')
-      this.dbPath = path.join(userDataPath, DB_NAME)
+      this.dbPath = pathNormalizationService.joinPaths(userDataPath, DB_NAME)
     }
 
-    // Ensure directory exists
-    const dbDir = path.dirname(this.dbPath)
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true })
-    }
+    // Ensure directory exists using path normalization service
+    const dbDir = pathNormalizationService.getDirname(this.dbPath)
+    pathNormalizationService.ensureDirectory(dbDir)
 
     // Create database connection
     this.db = new Database(this.dbPath)

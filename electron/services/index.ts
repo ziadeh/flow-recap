@@ -693,6 +693,32 @@ export type {
   RepairResult
 } from './pythonExecutionManager'
 
+// Windows Audio Compatibility Service (Windows-specific audio recording support)
+export { windowsAudioCompatibilityService } from './windowsAudioCompatibilityService'
+export type {
+  WindowsAudioDeviceType,
+  WindowsAudioAPIType,
+  WindowsRecorderType,
+  WindowsAudioDevice,
+  WindowsAudioDriverInfo,
+  WindowsAudioPermissionStatus,
+  WindowsExclusiveModeStatus,
+  WindowsSampleRateInfo,
+  WindowsVirtualCableInfo,
+  WindowsAudioDiagnostics,
+  WindowsAudioIssue,
+  WindowsRecordingFallbackResult
+} from './windowsAudioCompatibilityService'
+
+// Path Normalization Service (cross-platform path handling)
+export { pathNormalizationService, PathNormalizationService } from './pathNormalizationService'
+export type {
+  PathValidationResult,
+  PathComponents,
+  PathStyle,
+  PathNormalizationOptions
+} from './pathNormalizationService'
+
 // Re-export types for convenience
 export type {
   Meeting,
