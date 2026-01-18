@@ -1,10 +1,8 @@
 import { useState, useEffect, useMemo, memo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
-  Sparkles,
   Loader2,
-  AlertCircle,
-  RefreshCw,
+  Sparkles,
   Lightbulb,
   Gavel,
   Hash,
@@ -12,27 +10,31 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
-  User,
-  Filter,
   SortAsc,
   Download,
   Plus,
   Edit2,
-  CheckCircle,
   Circle,
   AlertTriangle,
-  Star,
-  GripVertical,
   Check,
   ChevronRight,
   FileText,
   FileJson,
   Table,
-  Info
+  Info,
+  Filter,
+  TrendingUp
 } from 'lucide-react'
+import {
+  ActionItemRow,
+  DecisionRow,
+  KeyPointRow,
+  GroupHeader,
+  CompactListContainer
+} from './CompactInsightRows'
 import type { MeetingNote, Task, TaskStatus, TaskPriority } from '../../types/database'
 import type { ExtractedDecision, ExtractedTopic, ExtractionProcessResult, SentimentType } from '../../types/electron-api'
-import { formatDateTime, formatDurationMs, isOverdue } from '../../lib/formatters'
+import { formatDurationMs } from '../../lib/formatters'
 import { Skeleton, SkeletonText } from '../ui/Skeleton'
 import { useRecordingStore } from '../../stores/recording-store'
 import { trackInsightsEvent, createTimeTracker } from '../../utils/insightsAnalytics'
@@ -41,6 +43,8 @@ import { LiveActionItemsList } from '../insights/LiveActionItemsList'
 import { LiveDecisionsList } from '../insights/LiveDecisionsList'
 import { LiveKeyPointsList } from '../insights/LiveKeyPointsList'
 import { LiveTopicsTimeline } from '../insights/LiveTopicsTimeline'
+import { UnifiedInsightsButton } from './UnifiedInsightsButton'
+import { MeetingSummary } from './MeetingSummary'
 
 // Type-safe accessor for the decisionsAndTopics API
 interface DecisionsAndTopicsAPI {
@@ -60,7 +64,6 @@ const getDecisionsAndTopicsAPI = (): DecisionsAndTopicsAPI => {
 // Types
 // ============================================================================
 
-type InsightSource = 'live' | 'ai' | 'manual' | 'regenerated'
 type ActionItemFilter = 'all' | 'assigned' | 'unassigned' | 'completed'
 type ActionItemSort = 'time' | 'priority' | 'assignee' | 'status'
 
@@ -448,53 +451,6 @@ function LiveInsightsView({ durationMs = 0 }: LiveInsightsViewProps) {
   )
 }
 
-// ============================================================================
-// Source Badge Component
-// ============================================================================
-
-function SourceBadge({ source }: { source: InsightSource }) {
-  const config: Record<InsightSource, { label: string; icon: string; color: string; bgColor: string; borderColor: string }> = {
-    live: { label: 'Live', icon: '✓', color: 'text-green-700', bgColor: 'bg-green-50', borderColor: 'border-green-200' },
-    ai: { label: 'AI', icon: '🤖', color: 'text-blue-700', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
-    manual: { label: 'Manual', icon: '✎', color: 'text-gray-700', bgColor: 'bg-gray-50', borderColor: 'border-gray-200' },
-    regenerated: { label: 'Regenerated', icon: '🔄', color: 'text-orange-700', bgColor: 'bg-orange-50', borderColor: 'border-orange-200' },
-  }
-
-  const { label, icon, color, bgColor, borderColor } = config[source]
-
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${bgColor} ${color} ${borderColor} border`}>
-      <span className="mr-1">{icon}</span>
-      {label}
-    </span>
-  )
-}
-
-// ============================================================================
-// Confidence Indicator Component
-// ============================================================================
-
-function ConfidenceStars({ score }: { score: number }) {
-  const stars = Math.round(score * 5)
-  const halfStar = (score * 5) % 1 >= 0.5
-
-  return (
-    <div className="flex items-center gap-0.5" title={`${Math.round(score * 100)}% confidence`}>
-      {[1, 2, 3, 4, 5].map((i) => (
-        <Star
-          key={i}
-          className={`w-3 h-3 ${
-            i <= stars
-              ? 'text-yellow-500 fill-yellow-500'
-              : i === stars + 1 && halfStar
-              ? 'text-yellow-500 fill-yellow-200'
-              : 'text-gray-300'
-          }`}
-        />
-      ))}
-    </div>
-  )
-}
 
 // ============================================================================
 // Collapsible Section Component
@@ -560,26 +516,6 @@ function CollapsibleSection({
   )
 }
 
-// ============================================================================
-// Priority Badge Component
-// ============================================================================
-
-const priorityConfig: Record<TaskPriority, { label: string; color: string; bgColor: string; borderColor: string }> = {
-  urgent: { label: 'Urgent', color: 'text-red-700', bgColor: 'bg-red-50', borderColor: 'border-red-200' },
-  high: { label: 'High', color: 'text-orange-700', bgColor: 'bg-orange-50', borderColor: 'border-orange-200' },
-  medium: { label: 'Medium', color: 'text-yellow-700', bgColor: 'bg-yellow-50', borderColor: 'border-yellow-200' },
-  low: { label: 'Low', color: 'text-gray-600', bgColor: 'bg-gray-50', borderColor: 'border-gray-200' },
-}
-
-function PriorityBadge({ priority }: { priority: TaskPriority }) {
-  const config = priorityConfig[priority]
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${config.bgColor} ${config.color} ${config.borderColor} border`}>
-      {priority === 'urgent' && <AlertTriangle className="w-3 h-3 mr-1" />}
-      {config.label}
-    </span>
-  )
-}
 
 // ============================================================================
 // Action Items Section
@@ -592,8 +528,9 @@ interface ActionItemsSectionProps {
 
 const ActionItemsSection = memo(function ActionItemsSection({ tasks, onTaskStatusChange }: ActionItemsSectionProps) {
   const [filter, setFilter] = useState<ActionItemFilter>('all')
-  const [sortBy, setSortBy] = useState<ActionItemSort>('time')
+  const [sortBy, setSortBy] = useState<ActionItemSort>('priority')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['urgent', 'high', 'medium', 'low']))
 
   // Filter tasks created during recording
   const recordingTasks = useMemo(() =>
@@ -638,6 +575,24 @@ const ActionItemsSection = memo(function ActionItemsSection({ tasks, onTaskStatu
     return result
   }, [recordingTasks, filter, sortBy])
 
+  // Group tasks by priority when sorting by priority
+  const groupedTasks = useMemo(() => {
+    if (sortBy !== 'priority') return null
+
+    const groups: Record<TaskPriority, Task[]> = {
+      urgent: [],
+      high: [],
+      medium: [],
+      low: [],
+    }
+
+    filteredTasks.forEach(task => {
+      groups[task.priority].push(task)
+    })
+
+    return groups
+  }, [filteredTasks, sortBy])
+
   const handleToggleSelect = (id: string) => {
     const newSet = new Set(selectedIds)
     if (newSet.has(id)) {
@@ -664,10 +619,28 @@ const ActionItemsSection = memo(function ActionItemsSection({ tasks, onTaskStatu
     setSelectedIds(new Set())
   }
 
-  const getSource = (task: Task): InsightSource => {
-    if (task.created_during_recording) return 'live'
-    if (task.generation_timestamp) return 'ai'
-    return 'manual'
+  const toggleGroup = (priority: string) => {
+    const newExpanded = new Set(expandedGroups)
+    if (newExpanded.has(priority)) {
+      newExpanded.delete(priority)
+    } else {
+      newExpanded.add(priority)
+    }
+    setExpandedGroups(newExpanded)
+  }
+
+  const priorityIcons: Record<TaskPriority, React.ReactNode> = {
+    urgent: <AlertTriangle className="w-4 h-4" />,
+    high: <TrendingUp className="w-4 h-4" />,
+    medium: <Circle className="w-4 h-4" />,
+    low: <Circle className="w-4 h-4" />,
+  }
+
+  const priorityColors: Record<TaskPriority, string> = {
+    urgent: 'text-red-600 dark:text-red-400',
+    high: 'text-orange-600 dark:text-orange-400',
+    medium: 'text-yellow-600 dark:text-yellow-400',
+    low: 'text-gray-600 dark:text-gray-400',
   }
 
   if (recordingTasks.length === 0) {
@@ -706,8 +679,8 @@ const ActionItemsSection = memo(function ActionItemsSection({ tasks, onTaskStatu
             className="px-3 py-1.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-purple-500"
             aria-label="Sort action items"
           >
-            <option value="time">Time Detected</option>
             <option value="priority">Priority</option>
+            <option value="time">Time Detected</option>
             <option value="assignee">Assignee</option>
             <option value="status">Status</option>
           </select>
@@ -740,71 +713,54 @@ const ActionItemsSection = memo(function ActionItemsSection({ tasks, onTaskStatu
         <span className="text-sm text-muted-foreground">Select all</span>
       </div>
 
-      {/* Task List */}
-      <div className="space-y-2">
-        {filteredTasks.map((task) => {
-          const isTaskOverdue = task.due_date && task.status !== 'completed' && isOverdue(task.due_date)
-          const isCompleted = task.status === 'completed'
+      {/* Compact Task List - Grouped by Priority */}
+      {groupedTasks ? (
+        <CompactListContainer>
+          {(['urgent', 'high', 'medium', 'low'] as TaskPriority[]).map((priority) => {
+            const tasksInGroup = groupedTasks[priority]
+            if (tasksInGroup.length === 0) return null
 
-          return (
-            <div
-              key={task.id}
-              className={`flex items-start gap-3 p-3 rounded-lg border transition-all ${
-                isTaskOverdue ? 'border-red-300 bg-red-50/50' : 'border-border bg-card'
-              } ${isCompleted ? 'opacity-75' : ''} hover:shadow-sm`}
-            >
-              <input
-                type="checkbox"
-                checked={selectedIds.has(task.id)}
-                onChange={() => handleToggleSelect(task.id)}
-                className="mt-1 w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                aria-label={`Select task: ${task.title}`}
-              />
-
-              <button
-                onClick={() => onTaskStatusChange?.(task.id, isCompleted ? 'pending' : 'completed')}
-                className={`mt-0.5 flex-shrink-0 ${onTaskStatusChange ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
-                aria-label={isCompleted ? 'Mark as pending' : 'Mark as complete'}
-              >
-                {isCompleted ? (
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                ) : (
-                  <Circle className="w-5 h-5 text-muted-foreground" />
-                )}
-              </button>
-
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <span className={`font-medium ${isCompleted ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-                    {task.title}
-                  </span>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <SourceBadge source={getSource(task)} />
-                    <PriorityBadge priority={task.priority} />
+            return (
+              <div key={priority}>
+                <GroupHeader
+                  title={priority.charAt(0).toUpperCase() + priority.slice(1) + ' Priority'}
+                  count={tasksInGroup.length}
+                  icon={priorityIcons[priority]}
+                  color={priorityColors[priority]}
+                  isExpanded={expandedGroups.has(priority)}
+                  onToggle={() => toggleGroup(priority)}
+                />
+                {expandedGroups.has(priority) && (
+                  <div>
+                    {tasksInGroup.map((task) => (
+                      <ActionItemRow
+                        key={task.id}
+                        task={task}
+                        isSelected={selectedIds.has(task.id)}
+                        onToggleSelect={handleToggleSelect}
+                        onStatusChange={onTaskStatusChange}
+                      />
+                    ))}
                   </div>
-                </div>
-
-                {task.description && (
-                  <p className="text-sm text-muted-foreground mb-2">{task.description}</p>
                 )}
-
-                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                  {task.assignee && (
-                    <span className="flex items-center px-2 py-0.5 bg-muted rounded-full">
-                      <User className="w-3 h-3 mr-1" />
-                      {task.assignee}
-                    </span>
-                  )}
-                  <span className="flex items-center">
-                    <Clock className="w-3 h-3 mr-1" />
-                    {formatDateTime(task.created_at)}
-                  </span>
-                </div>
               </div>
-            </div>
-          )
-        })}
-      </div>
+            )
+          })}
+        </CompactListContainer>
+      ) : (
+        /* Flat list when not sorting by priority */
+        <CompactListContainer>
+          {filteredTasks.map((task) => (
+            <ActionItemRow
+              key={task.id}
+              task={task}
+              isSelected={selectedIds.has(task.id)}
+              onToggleSelect={handleToggleSelect}
+              onStatusChange={onTaskStatusChange}
+            />
+          ))}
+        </CompactListContainer>
+      )}
     </div>
   )
 })
@@ -836,12 +792,6 @@ const DecisionsSection = memo(function DecisionsSection({ notes, extractedDecisi
     notes.filter(n => n.note_type === 'decision'),
     [notes]
   )
-
-  const getSource = (note: MeetingNote): InsightSource => {
-    if (note.created_during_recording) return 'live'
-    if (note.is_ai_generated) return 'ai'
-    return 'manual'
-  }
 
   const handleStartEdit = (note: MeetingNote) => {
     setEditingId(note.id)
@@ -890,51 +840,21 @@ const DecisionsSection = memo(function DecisionsSection({ notes, extractedDecisi
         </button>
       </div>
 
-      {/* Extracted Decisions */}
-      {extractedDecisions.map((decision, index) => {
-        const style = sentimentConfig[decision.sentiment]
-        return (
-          <div
+      {/* Compact Decision List */}
+      <CompactListContainer>
+        {/* Extracted Decisions */}
+        {extractedDecisions.map((decision, index) => (
+          <DecisionRow
             key={`extracted-${index}`}
-            className={`p-4 rounded-lg border ${style.bgColor} ${style.borderColor} hover:shadow-sm transition-shadow`}
-          >
-            <div className="flex items-start justify-between gap-2 mb-2">
-              <div className="flex items-center gap-2">
-                <SourceBadge source="ai" />
-                {decision.confidence && <ConfidenceStars score={decision.confidence} />}
-              </div>
-              {(decision.startTimeMs !== undefined && decision.endTimeMs !== undefined) && (
-                <span className="text-xs text-muted-foreground flex items-center">
-                  <Clock className="w-3 h-3 mr-1" />
-                  {formatDurationMs(decision.startTimeMs)} - {formatDurationMs(decision.endTimeMs)}
-                </span>
-              )}
-            </div>
+            decision={decision}
+            isExtracted={true}
+          />
+        ))}
 
-            <p className="font-medium text-foreground mb-2">{decision.content}</p>
-
-            {decision.context && (
-              <p className="text-sm text-muted-foreground italic mb-2">{decision.context}</p>
-            )}
-
-            {decision.speaker && (
-              <div className="flex items-center text-xs text-muted-foreground">
-                <User className="w-3 h-3 mr-1" />
-                {decision.speaker}
-              </div>
-            )}
-          </div>
-        )
-      })}
-
-      {/* Decision Notes */}
-      {decisionNotes.map((note) => (
-        <div
-          key={note.id}
-          className="p-4 rounded-lg border border-purple-200 bg-purple-50 hover:shadow-sm transition-shadow"
-        >
-          {editingId === note.id ? (
-            <div className="space-y-3">
+        {/* Decision Notes */}
+        {decisionNotes.map((note) => (
+          editingId === note.id ? (
+            <div key={note.id} className="p-3 border-b border-border/50 last:border-b-0">
               <textarea
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
@@ -942,7 +862,7 @@ const DecisionsSection = memo(function DecisionsSection({ notes, extractedDecisi
                 rows={3}
                 aria-label="Edit decision content"
               />
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end gap-2 mt-2">
                 <button
                   onClick={handleCancelEdit}
                   className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -958,35 +878,23 @@ const DecisionsSection = memo(function DecisionsSection({ notes, extractedDecisi
               </div>
             </div>
           ) : (
-            <>
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <div className="flex items-center gap-2">
-                  <SourceBadge source={getSource(note)} />
-                  {note.confidence_score && <ConfidenceStars score={note.confidence_score} />}
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => handleStartEdit(note)}
-                    className="p-1 text-muted-foreground hover:text-foreground transition-colors"
-                    aria-label="Edit decision"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <span className="text-xs text-muted-foreground">
-                    {formatDateTime(note.created_at)}
-                  </span>
-                </div>
-              </div>
-
-              <p className="font-medium text-foreground">{note.content}</p>
-
-              {note.context && (
-                <p className="text-sm text-muted-foreground italic mt-2">{note.context}</p>
-              )}
-            </>
-          )}
-        </div>
-      ))}
+            <div key={note.id} className="relative group">
+              <DecisionRow
+                decision={note}
+                isExtracted={false}
+              />
+              {/* Edit button overlay on hover */}
+              <button
+                onClick={() => handleStartEdit(note)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label="Edit decision"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+            </div>
+          )
+        ))}
+      </CompactListContainer>
     </div>
   )
 })
@@ -1001,7 +909,7 @@ interface KeyPointsSectionProps {
 }
 
 const KeyPointsSection = memo(function KeyPointsSection({ notes, onAddKeyPoint }: KeyPointsSectionProps) {
-  const [, setDraggedIndex] = useState<number | null>(null)
+  const [showCriticalOnly, setShowCriticalOnly] = useState(false)
 
   // Filter key point notes
   const keyPointNotes = useMemo(() =>
@@ -1009,18 +917,19 @@ const KeyPointsSection = memo(function KeyPointsSection({ notes, onAddKeyPoint }
     [notes]
   )
 
-  const getSource = (note: MeetingNote): InsightSource => {
-    if (note.created_during_recording) return 'live'
-    if (note.is_ai_generated) return 'ai'
-    return 'manual'
-  }
-
   // Check if a key point is "critical" based on keywords or confidence
   const isCritical = (note: MeetingNote): boolean => {
     const criticalKeywords = ['critical', 'urgent', 'important', 'essential', 'key', 'major']
     const content = note.content.toLowerCase()
     return criticalKeywords.some(k => content.includes(k)) || (note.confidence_score ?? 0) > 0.9
   }
+
+  // Split into critical and regular key points
+  const criticalPoints = useMemo(() => {
+    return keyPointNotes.filter(note => isCritical(note))
+  }, [keyPointNotes])
+
+  const filteredNotes = showCriticalOnly ? criticalPoints : keyPointNotes
 
   if (keyPointNotes.length === 0) {
     return (
@@ -1040,77 +949,39 @@ const KeyPointsSection = memo(function KeyPointsSection({ notes, onAddKeyPoint }
 
   return (
     <div className="space-y-4">
-      {/* Add button */}
-      <div className="flex justify-end">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between">
+        {/* Filter toggle */}
+        {criticalPoints.length > 0 && (
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showCriticalOnly}
+              onChange={(e) => setShowCriticalOnly(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-yellow-600 focus:ring-yellow-500"
+            />
+            <span className="text-muted-foreground">
+              Show critical only ({criticalPoints.length})
+            </span>
+          </label>
+        )}
+
+        {/* Add button */}
         <button
           onClick={onAddKeyPoint}
-          className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-yellow-600 border border-yellow-300 rounded-lg hover:bg-yellow-50 transition-colors"
+          className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-yellow-600 border border-yellow-300 rounded-lg hover:bg-yellow-50 transition-colors ml-auto"
         >
           <Plus className="w-4 h-4 mr-1" />
           Add Manual Key Point
         </button>
       </div>
 
-      {/* Key Points List */}
-      <ul className="space-y-2" role="list">
-        {keyPointNotes.map((note, index) => {
-          const critical = isCritical(note)
-          return (
-            <li
-              key={note.id}
-              className={`flex items-start gap-3 p-3 rounded-lg border transition-all ${
-                critical
-                  ? 'border-yellow-400 bg-yellow-50 ring-2 ring-yellow-200'
-                  : 'border-border bg-card'
-              } hover:shadow-sm cursor-move`}
-              draggable
-              onDragStart={() => setDraggedIndex(index)}
-              onDragEnd={() => setDraggedIndex(null)}
-              onDragOver={(e) => e.preventDefault()}
-              role="listitem"
-            >
-              <GripVertical className="w-4 h-4 text-muted-foreground mt-1 flex-shrink-0" />
-
-              <div className="flex-shrink-0 mt-1">
-                {critical ? (
-                  <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
-                ) : (
-                  <span className="w-2 h-2 rounded-full bg-yellow-500 block mt-1" />
-                )}
-              </div>
-
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2">
-                  <p className={`text-foreground ${critical ? 'font-semibold' : ''}`}>
-                    {note.content}
-                  </p>
-                  <SourceBadge source={getSource(note)} />
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-muted-foreground">
-                  {note.speaker_id && (
-                    <span className="flex items-center">
-                      <User className="w-3 h-3 mr-1" />
-                      Speaker {note.speaker_id}
-                    </span>
-                  )}
-                  {note.start_time_ms !== null && (
-                    <span className="flex items-center">
-                      <Clock className="w-3 h-3 mr-1" />
-                      {formatDurationMs(note.start_time_ms)}
-                    </span>
-                  )}
-                  {critical && (
-                    <span className="px-2 py-0.5 bg-yellow-200 text-yellow-800 rounded-full font-medium">
-                      Critical
-                    </span>
-                  )}
-                </div>
-              </div>
-            </li>
-          )
-        })}
-      </ul>
+      {/* Compact Key Points List */}
+      <CompactListContainer>
+        {filteredNotes.map((note) => (
+          <KeyPointRow key={note.id} note={note} />
+        ))}
+      </CompactListContainer>
     </div>
   )
 })
@@ -1327,128 +1198,6 @@ const TopicsSection = memo(function TopicsSection({ topics, meetingDurationMs, o
 })
 
 // ============================================================================
-// Regeneration Controls
-// ============================================================================
-
-interface RegenerationControlsProps {
-  meetingId: string
-  hasTranscripts: boolean
-  hasExistingInsights: boolean
-  generationTimestamp?: string
-  onRegenerate: (mode: 'replace' | 'merge', section?: 'all' | 'decisions' | 'action_items' | 'key_points' | 'topics') => void
-  isRegenerating: boolean
-}
-
-function RegenerationControls({
-  hasTranscripts,
-  hasExistingInsights,
-  generationTimestamp,
-  onRegenerate,
-  isRegenerating
-}: RegenerationControlsProps) {
-  const [showDropdown, setShowDropdown] = useState(false)
-
-  if (!hasTranscripts) {
-    return null
-  }
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-4 mb-6 p-4 bg-muted/30 rounded-lg">
-      <div className="flex items-center gap-4">
-        {generationTimestamp && (
-          <span className="text-sm text-muted-foreground">
-            Insights generated at {formatDateTime(generationTimestamp)}
-          </span>
-        )}
-      </div>
-
-      <div className="relative">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowDropdown(!showDropdown)}
-            disabled={isRegenerating}
-            className={`inline-flex items-center px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-              isRegenerating
-                ? 'bg-purple-100 text-purple-400 cursor-not-allowed'
-                : 'bg-purple-600 text-white hover:bg-purple-700'
-            }`}
-          >
-            {isRegenerating ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Regenerating...
-              </>
-            ) : hasExistingInsights ? (
-              <>
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Regenerate All Insights
-                <ChevronDown className="w-4 h-4 ml-2" />
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4 mr-2" />
-                Generate Insights with AI
-              </>
-            )}
-          </button>
-        </div>
-
-        {showDropdown && !isRegenerating && (
-          <div className="absolute right-0 mt-2 w-64 bg-card border border-border rounded-lg shadow-lg z-10">
-            <div className="p-2">
-              <button
-                onClick={() => { onRegenerate('replace', 'all'); setShowDropdown(false) }}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-muted rounded-lg transition-colors"
-              >
-                <span className="font-medium">Replace existing insights</span>
-                <p className="text-xs text-muted-foreground mt-0.5">This will delete all current insights</p>
-              </button>
-              <button
-                onClick={() => { onRegenerate('merge', 'all'); setShowDropdown(false) }}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-muted rounded-lg transition-colors"
-              >
-                <span className="font-medium">Merge with existing insights</span>
-                <p className="text-xs text-muted-foreground mt-0.5">Add new insights without removing existing ones</p>
-              </button>
-              <div className="border-t border-border my-2" />
-              <p className="px-3 py-1 text-xs font-medium text-muted-foreground">Regenerate Section</p>
-              <button
-                onClick={() => { onRegenerate('replace', 'action_items'); setShowDropdown(false) }}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-muted rounded-lg transition-colors flex items-center"
-              >
-                <CheckSquare className="w-4 h-4 mr-2 text-green-600" />
-                Action Items Only
-              </button>
-              <button
-                onClick={() => { onRegenerate('replace', 'decisions'); setShowDropdown(false) }}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-muted rounded-lg transition-colors flex items-center"
-              >
-                <Gavel className="w-4 h-4 mr-2 text-purple-600" />
-                Decisions Only
-              </button>
-              <button
-                onClick={() => { onRegenerate('replace', 'key_points'); setShowDropdown(false) }}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-muted rounded-lg transition-colors flex items-center"
-              >
-                <Lightbulb className="w-4 h-4 mr-2 text-yellow-600" />
-                Key Points Only
-              </button>
-              <button
-                onClick={() => { onRegenerate('replace', 'topics'); setShowDropdown(false) }}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-muted rounded-lg transition-colors flex items-center"
-              >
-                <Hash className="w-4 h-4 mr-2 text-blue-600" />
-                Topics Only
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ============================================================================
 // Export Controls
 // ============================================================================
 
@@ -1555,13 +1304,9 @@ export function InsightsTab({
 }: InsightsTabProps) {
   const [extractedDecisions, setExtractedDecisions] = useState<ExtractedDecision[]>([])
   const [extractedTopics, setExtractedTopics] = useState<ExtractedTopic[]>([])
-  const [isRegenerating, setIsRegenerating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [isFetching, setIsFetching] = useState(false)
   const [hasFetched, setHasFetched] = useState(false)
-  const [lastGenerationMode, setLastGenerationMode] = useState<'strict' | 'balanced' | 'loose' | null>(null)
 
   // Recording state for detecting active recordings
   const recordingStatus = useRecordingStore((state) => state.status)
@@ -1682,94 +1427,6 @@ export function InsightsTab({
     }
   }, [isActive, meetingId, hasTranscripts, totalInsights, isRecordingThisMeeting])
 
-  // Handle regeneration
-  const handleRegenerate = async (mode: 'replace' | 'merge', section?: 'all' | 'decisions' | 'action_items' | 'key_points' | 'topics', customNoteMode?: 'strict' | 'balanced' | 'loose') => {
-    setIsRegenerating(true)
-    setError(null)
-    setSuccessMessage(null)
-
-    // Track regeneration started
-    trackInsightsEvent('generate_insights_clicked', {
-      meetingId,
-      mode,
-      section: section || 'all',
-      hasExistingInsights,
-    })
-
-    const api = getDecisionsAndTopicsAPI()
-
-    try {
-      // Check if LLM service is available
-      const availability = await api.checkAvailability()
-
-      if (!availability.available) {
-        setError(availability.error || 'LLM service is not available. Please ensure LM Studio is running.')
-        setIsRegenerating(false)
-        return
-      }
-
-      // If replace mode and regenerating all, delete existing
-      if (mode === 'replace' && (section === 'all' || !section)) {
-        await api.deleteExisting(meetingId)
-      }
-
-      // Get the note generation mode from settings if not provided
-      let noteGenerationMode: 'strict' | 'balanced' | 'loose' = customNoteMode || 'strict'
-      if (!customNoteMode) {
-        const savedMode = await window.electronAPI.db.settings.get<string>('ai.noteGenerationMode')
-        if (savedMode && (savedMode === 'strict' || savedMode === 'balanced' || savedMode === 'loose')) {
-          noteGenerationMode = savedMode
-        }
-      }
-
-      // Extract new insights with the note generation mode
-      const result = await api.extract(meetingId, { noteGenerationMode })
-
-      if (!result.success) {
-        setError(result.error || 'Failed to regenerate insights')
-        setIsRegenerating(false)
-        return
-      }
-
-      // Save the mode that was used for this generation
-      setLastGenerationMode(noteGenerationMode)
-
-      // Show success message
-      const decisionsCount = result.extraction?.decisions?.length || 0
-      const topicsCount = result.extraction?.topics?.length || 0
-      const keyPointsCount = result.extraction?.keyPoints?.length || 0
-
-      setSuccessMessage(
-        `Extracted ${decisionsCount} decision${decisionsCount !== 1 ? 's' : ''}, ` +
-        `${topicsCount} topic${topicsCount !== 1 ? 's' : ''}, and ` +
-        `${keyPointsCount} key point${keyPointsCount !== 1 ? 's' : ''}!`
-      )
-
-      // Track successful generation
-      trackInsightsEvent(hasExistingInsights ? 'insight_regenerated' : 'insight_generated', {
-        meetingId,
-        mode,
-        section: section || 'all',
-        decisionsCount,
-        topicsCount,
-        keyPointsCount,
-        processingTimeMs: result.metadata?.processingTimeMs,
-        noteGenerationMode,
-      })
-
-      // Notify parent to refetch data
-      onDataExtracted()
-      setRefreshKey(prev => prev + 1)
-
-      // Auto-hide success message
-      setTimeout(() => setSuccessMessage(null), 5000)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unexpected error occurred')
-    } finally {
-      setIsRegenerating(false)
-    }
-  }
-
   // Show loading skeleton while fetching (but not during recording)
   if ((isLoading || isFetching) && !isRecordingThisMeeting) {
     return <InsightsLoadingSkeleton />
@@ -1801,114 +1458,48 @@ export function InsightsTab({
         <Lightbulb className="w-16 h-16 text-muted-foreground mb-4" />
         <h3 className="text-xl font-semibold text-foreground mb-2">No insights available for this meeting</h3>
         <p className="text-muted-foreground max-w-md mb-6">
-          AI can analyze the transcript to extract action items, decisions, key points, and topics.
+          AI can analyze the transcript to extract action items, decisions, key points, topics, and sentiment analysis.
         </p>
-        <button
-          onClick={() => handleRegenerate('replace', 'all')}
-          disabled={isRegenerating}
-          className={`inline-flex items-center px-6 py-3 rounded-lg font-medium text-sm transition-colors ${
-            isRegenerating
-              ? 'bg-purple-100 text-purple-400 cursor-not-allowed'
-              : 'bg-purple-600 text-white hover:bg-purple-700'
-          }`}
-        >
-          {isRegenerating ? (
-            <>
-              <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-              Generating...
-            </>
-          ) : (
-            <>
-              <Sparkles className="w-5 h-5 mr-2" />
-              Generate Insights with AI
-            </>
-          )}
-        </button>
-
-        {error && (
-          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg max-w-md">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="text-sm text-red-700">{error}</p>
-                <p className="text-xs text-red-600 mt-1">
-                  Make sure LM Studio is running on localhost:1234 with a model loaded.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+        <UnifiedInsightsButton
+          meetingId={meetingId}
+          hasTranscripts={hasTranscripts}
+          hasExistingInsights={false}
+          onGenerationComplete={() => {
+            onDataExtracted()
+            setRefreshKey(prev => prev + 1)
+          }}
+          isRecording={isRecordingThisMeeting}
+        />
       </div>
     )
   }
 
   return (
     <div className="py-4 space-y-6">
-      {/* Header with regeneration and export controls */}
-      <div className="flex items-center justify-between">
-        <RegenerationControls
+      {/* Header with unified insights generation and export controls */}
+      <div className="flex flex-col gap-4">
+        <UnifiedInsightsButton
           meetingId={meetingId}
           hasTranscripts={hasTranscripts}
           hasExistingInsights={hasExistingInsights}
           generationTimestamp={generationTimestamp}
-          onRegenerate={handleRegenerate}
-          isRegenerating={isRegenerating}
+          onGenerationComplete={() => {
+            onDataExtracted()
+            setRefreshKey(prev => prev + 1)
+          }}
+          isRecording={isRecordingThisMeeting}
         />
-        <ExportControls meetingId={meetingId} hasInsights={totalInsights > 0} />
+        <div className="flex justify-end">
+          <ExportControls meetingId={meetingId} hasInsights={totalInsights > 0} />
+        </div>
       </div>
 
-      {/* Error message */}
-      {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-          <div className="flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="text-sm text-red-700">{error}</p>
-              <p className="text-xs text-red-600 mt-1">
-                Make sure LM Studio is running on localhost:1234 with a model loaded.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Success message */}
-      {successMessage && (
-        <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-green-600 flex-shrink-0" />
-            <p className="text-sm text-green-700">{successMessage}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Note Generation Mode Indicator */}
-      {lastGenerationMode && hasExistingInsights && (
-        <div className="flex items-center justify-between p-3 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg">
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-purple-600 dark:text-purple-400 flex-shrink-0" />
-            <span className="text-sm text-purple-700 dark:text-purple-300">
-              Generated with: <span className="font-medium capitalize">{lastGenerationMode}</span> filtering
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handleRegenerate('replace', 'all', lastGenerationMode === 'strict' ? 'balanced' : lastGenerationMode === 'balanced' ? 'loose' : 'strict')}
-              disabled={isRegenerating}
-              className="px-3 py-1.5 text-xs font-medium bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/70 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isRegenerating ? (
-                <>
-                  <Loader2 className="w-3 h-3 inline mr-1 animate-spin" />
-                  Regenerating...
-                </>
-              ) : (
-                `Try ${lastGenerationMode === 'strict' ? 'Balanced' : lastGenerationMode === 'balanced' ? 'Loose' : 'Strict'} mode`
-              )}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Meeting Summary Section */}
+      <MeetingSummary
+        notes={notes}
+        meetingId={meetingId}
+        onNotesUpdated={onDataExtracted}
+      />
 
       {/* Collapsible Sections */}
       <div className="space-y-4">

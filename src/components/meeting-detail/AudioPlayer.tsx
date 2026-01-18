@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { Play, Pause, Volume2, VolumeX, Clock, HardDrive, AlertCircle, Loader2 } from 'lucide-react'
-import { formatDuration, formatDateTime, formatFileSize } from '../../lib/formatters'
+import { Play, Pause, Volume2, VolumeX, Volume1, AlertCircle, Loader2, Download, ChevronDown, HardDrive } from 'lucide-react'
+import { formatDuration, formatFileSize } from '../../lib/formatters'
 import { RecordingControls } from './RecordingControls'
 import type { Recording } from '../../types/database'
 
@@ -8,6 +8,10 @@ interface AudioPlayerProps {
   audioFilePath: string | null
   meetingId: string
   lastRecording?: Recording | null
+  /** All recordings for the meeting - enables recording selector dropdown */
+  recordings?: Recording[]
+  /** Called when user selects a different recording */
+  onRecordingSelect?: (recording: Recording) => void
   onTimeUpdate?: (currentTime: number) => void
   onSeek?: (time: number) => void
   onRecordingSaved?: () => void
@@ -49,7 +53,15 @@ function getPlaybackErrorMessage(error: unknown, audioElement: HTMLAudioElement 
   return 'Failed to play audio. Please check the console for details.'
 }
 
-export function AudioPlayer({ audioFilePath, meetingId, lastRecording, onTimeUpdate, onSeek, onRecordingSaved }: AudioPlayerProps) {
+// Playback speed options
+const PLAYBACK_SPEEDS = [
+  { value: 1, label: '1x' },
+  { value: 1.25, label: '1.25x' },
+  { value: 1.5, label: '1.5x' },
+  { value: 2, label: '2x' },
+]
+
+export function AudioPlayer({ audioFilePath, meetingId, lastRecording, recordings, onRecordingSelect, onTimeUpdate, onSeek, onRecordingSaved }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -59,6 +71,9 @@ export function AudioPlayer({ audioFilePath, meetingId, lastRecording, onTimeUpd
   const [playbackRate, setPlaybackRate] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isSpeedDropdownOpen, setIsSpeedDropdownOpen] = useState(false)
+  const [isVolumeExpanded, setIsVolumeExpanded] = useState(false)
+  const [isRecordingDropdownOpen, setIsRecordingDropdownOpen] = useState(false)
 
   // Cache-busting key that only changes when audioFilePath changes
   // This prevents browser from using cached version with incomplete WAV header
@@ -319,38 +334,47 @@ export function AudioPlayer({ audioFilePath, meetingId, lastRecording, onTimeUpd
     }
   }, [audioFilePath, audioSrc])
 
-  // If audio file exists, show player with compact recording controls for additional recordings
-  return (
-    <div className="space-y-4">
-      {/* Recording Metadata */}
-      {lastRecording && (
-        <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
-          <div className="flex flex-wrap gap-4 text-sm">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Clock className="w-4 h-4" />
-              <span className="font-medium">Recorded:</span>
-              <span>{formatDateTime(lastRecording.start_time)}</span>
-            </div>
-            {lastRecording.duration_seconds !== null && (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Clock className="w-4 h-4" />
-                <span className="font-medium">Duration:</span>
-                <span>{formatDuration(lastRecording.duration_seconds)}</span>
-              </div>
-            )}
-            {lastRecording.file_size_bytes !== null && (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <HardDrive className="w-4 h-4" />
-                <span className="font-medium">Size:</span>
-                <span>{formatFileSize(lastRecording.file_size_bytes)}</span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+  // Handle download - open file location in system file explorer
+  const handleDownload = () => {
+    if (audioFilePath) {
+      window.electronAPI?.shell?.openPath(audioFilePath)
+    }
+  }
 
-      {/* Audio Player */}
-      <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('[data-speed-dropdown]')) {
+        setIsSpeedDropdownOpen(false)
+      }
+      if (!target.closest('[data-recording-dropdown]')) {
+        setIsRecordingDropdownOpen(false)
+      }
+    }
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
+  }, [])
+
+  // Get the format from the file extension
+  const getFileFormat = (path: string): string => {
+    const ext = path.split('.').pop()?.toUpperCase() || 'AUDIO'
+    return ext
+  }
+
+  // Get a short label for recording in dropdown
+  const getRecordingLabel = (recording: Recording, index: number): string => {
+    const date = new Date(recording.start_time)
+    return `Recording ${index + 1} - ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+  }
+
+  // If audio file exists, show compact player with 3-row layout
+  // Total height: ~120-140px (header 32px + progress 40px + controls 40px + padding)
+  return (
+    <div className="space-y-3">
+      {/* Compact Audio Player Card */}
+      <div className="bg-muted/30 border border-border rounded-lg shadow-sm overflow-hidden" data-testid="audio-player">
+        {/* Hidden audio element */}
         <audio
           ref={audioRef}
           src={audioSrc}
@@ -359,7 +383,6 @@ export function AudioPlayer({ audioFilePath, meetingId, lastRecording, onTimeUpd
           onLoadedMetadata={handleLoadedMetadata}
           onLoadedData={handleLoadedMetadata}
           onCanPlay={() => {
-            // Ensure duration is set when audio can play
             if (audioRef.current && duration === 0) {
               const audioDuration = audioRef.current.duration
               if (audioDuration && isFinite(audioDuration) && audioDuration > 0) {
@@ -373,7 +396,7 @@ export function AudioPlayer({ audioFilePath, meetingId, lastRecording, onTimeUpd
           onError={(e) => {
             const audioElement = audioRef.current
             const mediaError = audioElement?.error
-            
+
             console.error('[AudioPlayer] Audio error event:', e)
             console.error('[AudioPlayer] Audio error details:', {
               error: mediaError,
@@ -385,8 +408,7 @@ export function AudioPlayer({ audioFilePath, meetingId, lastRecording, onTimeUpd
               audioFilePath: audioFilePath,
               audioSrc: audioSrc
             })
-            
-            // Log specific error codes for debugging
+
             if (mediaError) {
               switch (mediaError.code) {
                 case MediaError.MEDIA_ERR_ABORTED:
@@ -405,36 +427,93 @@ export function AudioPlayer({ audioFilePath, meetingId, lastRecording, onTimeUpd
                   console.error('[AudioPlayer] Media error: Unknown error code', mediaError.code)
               }
             }
-            
+
             setIsPlaying(false)
             setIsLoading(false)
-            // Set error message for display
             const errorMessage = getPlaybackErrorMessage(null, audioElement)
             setError(errorMessage)
-            // Try to use recording duration as fallback on error
             if (lastRecording?.duration_seconds !== null && lastRecording?.duration_seconds !== undefined && duration === 0) {
               setDuration(lastRecording.duration_seconds)
             }
           }}
         />
 
-        {/* Error display */}
+        {/* Error display - compact */}
         {error && (
-          <div className="flex items-center gap-2 p-3 mb-4 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <span className="flex-1">{error}</span>
+          <div className="flex items-center gap-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-xs">
+            <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="flex-1 truncate">{error}</span>
             <button
               onClick={() => setError(null)}
-              className="text-red-500 hover:text-red-700 font-medium"
+              className="text-red-500 hover:text-red-700 font-medium text-xs"
             >
-              Dismiss
+              ×
             </button>
           </div>
         )}
 
-        <div className="space-y-4">
-          {/* Progress bar */}
-          <div className="space-y-2">
+        {/* Row 1: Header (32px) - Recording selector + file info badge */}
+        <div className="flex items-center justify-between px-3 h-8 border-b border-border/50">
+          {/* Recording selector dropdown (if multiple recordings) */}
+          {recordings && recordings.length > 1 ? (
+            <div className="relative" data-recording-dropdown>
+              <button
+                onClick={() => setIsRecordingDropdownOpen(!isRecordingDropdownOpen)}
+                className="flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-purple-600 transition-colors min-h-[28px]"
+                data-testid="recording-selector"
+              >
+                <span className="truncate max-w-[140px]">
+                  {lastRecording ? getRecordingLabel(lastRecording, recordings.findIndex(r => r.id === lastRecording.id)) : 'Select Recording'}
+                </span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isRecordingDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isRecordingDropdownOpen && (
+                <div className="absolute top-full left-0 mt-1 z-20 bg-card border border-border rounded-md shadow-lg min-w-[180px] py-1">
+                  {recordings.map((recording, index) => (
+                    <button
+                      key={recording.id}
+                      onClick={() => {
+                        onRecordingSelect?.(recording)
+                        setIsRecordingDropdownOpen(false)
+                      }}
+                      className={`w-full px-3 py-1.5 text-left text-xs hover:bg-muted transition-colors ${
+                        recording.id === lastRecording?.id ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400' : 'text-foreground'
+                      }`}
+                    >
+                      {getRecordingLabel(recording, index)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <span className="text-xs font-medium text-foreground">Recording</span>
+          )}
+
+          {/* File info badge */}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {lastRecording?.file_size_bytes && (
+              <span className="flex items-center gap-1">
+                <HardDrive className="w-3 h-3" />
+                {formatFileSize(lastRecording.file_size_bytes)}
+              </span>
+            )}
+            {audioFilePath && (
+              <span className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-medium uppercase">
+                {getFileFormat(audioFilePath)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Row 2: Progress bar (40px) - time elapsed, seekable progress, total duration */}
+        <div className="flex items-center gap-2 px-3 h-10">
+          <span className="text-xs font-mono text-muted-foreground w-10 text-right tabular-nums" data-testid="current-time">
+            {formatDuration(currentTime)}
+          </span>
+
+          <div className="flex-1 relative">
             <input
               type="range"
               min="0"
@@ -442,67 +521,97 @@ export function AudioPlayer({ audioFilePath, meetingId, lastRecording, onTimeUpd
               step="0.1"
               value={currentTime}
               onChange={handleSeek}
-              className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-purple-600"
+              className="w-full h-1.5 bg-muted rounded-full appearance-none cursor-pointer"
               style={{
-                background: `linear-gradient(to right, rgb(147 51 234) 0%, rgb(147 51 234) ${progressPercentage}%, rgb(229 229 229) ${progressPercentage}%, rgb(229 229 229) 100%)`,
+                background: `linear-gradient(to right, rgb(147 51 234) 0%, rgb(147 51 234) ${progressPercentage}%, hsl(var(--muted)) ${progressPercentage}%, hsl(var(--muted)) 100%)`,
               }}
+              data-testid="progress-bar"
             />
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>{formatDuration(currentTime)}</span>
-              <span>{formatDuration(duration)}</span>
-            </div>
           </div>
 
-          {/* Controls */}
-          <div className="flex items-center gap-4">
-            {/* Play/Pause button */}
+          <span className="text-xs font-mono text-muted-foreground w-10 tabular-nums" data-testid="total-duration">
+            {formatDuration(duration)}
+          </span>
+        </div>
+
+        {/* Row 3: Controls (40px) - play/pause, speed dropdown, volume, download */}
+        <div className="flex items-center gap-2 px-3 h-10 border-t border-border/50">
+          {/* Play/Pause button (36px touch target) */}
+          <button
+            onClick={handlePlayPause}
+            disabled={isLoading}
+            className="w-9 h-9 rounded-full bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+            title={isLoading ? 'Loading audio...' : isPlaying ? 'Pause' : 'Play'}
+            data-testid="play-pause-button"
+          >
+            {isLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : isPlaying ? (
+              <Pause className="w-4 h-4" />
+            ) : (
+              <Play className="w-4 h-4 ml-0.5" />
+            )}
+          </button>
+
+          {/* Speed selector dropdown (80px width) */}
+          <div className="relative" data-speed-dropdown>
             <button
-              onClick={handlePlayPause}
-              disabled={isLoading}
-              className="w-10 h-10 rounded-full bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title={isLoading ? 'Loading audio...' : isPlaying ? 'Pause' : 'Play'}
+              onClick={() => setIsSpeedDropdownOpen(!isSpeedDropdownOpen)}
+              className="flex items-center justify-between w-[72px] h-8 px-2 text-xs font-medium bg-muted/50 hover:bg-muted rounded transition-colors"
+              data-testid="speed-selector"
             >
-              {isLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : isPlaying ? (
-                <Pause className="w-5 h-5" />
+              <span>{playbackRate}x</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isSpeedDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isSpeedDropdownOpen && (
+              <div className="absolute bottom-full left-0 mb-1 z-20 bg-card border border-border rounded-md shadow-lg min-w-[72px] py-1">
+                {PLAYBACK_SPEEDS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => {
+                      handlePlaybackRateChange(value)
+                      setIsSpeedDropdownOpen(false)
+                    }}
+                    className={`w-full px-2 py-1.5 text-left text-xs hover:bg-muted transition-colors ${
+                      playbackRate === value ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400' : 'text-foreground'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Collapsible Volume control (60px when expanded) */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                if (isVolumeExpanded) {
+                  handleMuteToggle()
+                } else {
+                  setIsVolumeExpanded(true)
+                }
+              }}
+              onDoubleClick={() => setIsVolumeExpanded(!isVolumeExpanded)}
+              className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors rounded hover:bg-muted/50"
+              title={isVolumeExpanded ? (isMuted ? 'Unmute' : 'Mute') : 'Click to expand volume, double-click to toggle'}
+              data-testid="volume-button"
+            >
+              {isMuted || volume === 0 ? (
+                <VolumeX className="w-4 h-4" />
+              ) : volume < 0.5 ? (
+                <Volume1 className="w-4 h-4" />
               ) : (
-                <Play className="w-5 h-5 ml-0.5" />
+                <Volume2 className="w-4 h-4" />
               )}
             </button>
 
-            {/* Playback speed */}
-            <div className="flex items-center gap-1">
-              {[0.5, 1, 1.5, 2].map((rate) => (
-                <button
-                  key={rate}
-                  onClick={() => handlePlaybackRateChange(rate)}
-                  className={`
-                    px-2 py-1 rounded text-xs font-medium transition-colors
-                    ${
-                      playbackRate === rate
-                        ? 'bg-purple-100 text-purple-700'
-                        : 'text-muted-foreground hover:bg-muted'
-                    }
-                  `}
-                >
-                  {rate}x
-                </button>
-              ))}
-            </div>
-
-            {/* Volume control */}
-            <div className="flex items-center gap-2 ml-auto">
-              <button
-                onClick={handleMuteToggle}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {isMuted || volume === 0 ? (
-                  <VolumeX className="w-5 h-5" />
-                ) : (
-                  <Volume2 className="w-5 h-5" />
-                )}
-              </button>
+            {isVolumeExpanded && (
               <input
                 type="range"
                 min="0"
@@ -510,18 +619,28 @@ export function AudioPlayer({ audioFilePath, meetingId, lastRecording, onTimeUpd
                 step="0.01"
                 value={isMuted ? 0 : volume}
                 onChange={handleVolumeChange}
-                className="w-20 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-purple-600"
+                className="w-[52px] h-1 bg-muted rounded-full appearance-none cursor-pointer accent-purple-600"
+                onBlur={() => setIsVolumeExpanded(false)}
+                data-testid="volume-slider"
               />
-            </div>
+            )}
           </div>
+
+          {/* Download button (icon only) */}
+          <button
+            onClick={handleDownload}
+            className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors rounded hover:bg-muted/50"
+            title="Open file location"
+            data-testid="download-button"
+          >
+            <Download className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
-      {/* Recording Controls - always available for additional recordings */}
-      <div className="bg-card border border-border rounded-lg px-4 py-3 shadow-sm flex items-center justify-between">
-        <span className="text-sm text-muted-foreground">
-          Add another recording to this meeting
-        </span>
+      {/* Compact Recording Controls - for adding additional recordings */}
+      <div className="bg-muted/20 border border-border rounded-lg px-3 py-2 flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">Add recording</span>
         <RecordingControls meetingId={meetingId} onRecordingSaved={onRecordingSaved} compact />
       </div>
     </div>

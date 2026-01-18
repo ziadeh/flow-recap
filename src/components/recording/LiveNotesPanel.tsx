@@ -30,6 +30,7 @@ import {
   Cpu,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { cleanNoteContent } from '@/lib/formatters'
 import { useLiveNotes } from '@/hooks/useLiveNotes'
 import type { LiveNoteItem, LiveNoteType } from '@/stores/live-notes-store'
 
@@ -128,7 +129,7 @@ function NoteItemDisplay({ note, config, onRemove }: NoteItemProps) {
     >
       <Icon className={cn('w-4 h-4 mt-0.5 flex-shrink-0', config.textColor)} />
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-foreground leading-relaxed">{note.content}</p>
+        <p className="text-sm text-foreground leading-relaxed">{cleanNoteContent(note.content)}</p>
         <div className="flex flex-wrap items-center gap-2 mt-1">
           {/* Preliminary badge */}
           {note.isPreliminary && (

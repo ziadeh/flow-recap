@@ -200,6 +200,17 @@ SENTIMENT CLASSIFICATION:
 - neutral: Factual, informational, objective discussion
 - mixed: Contains both positive and negative elements
 
+IMPORTANT - SENTIMENT ANALYSIS REQUIREMENT:
+You MUST always analyze and include the overall meeting sentiment (Positive/Neutral/Negative/Mixed) in your response.
+Analyze the overall meeting sentiment based on:
+- Tone of discussions and participant engagement
+- Outcomes and decisions reached
+- Level of agreement vs disagreement
+- Energy and enthusiasm levels
+- Any concerns or challenges raised
+
+The overallSentiment and sentimentBreakdown fields are REQUIRED and must always be populated.
+
 OUTPUT FORMAT:
 You MUST respond with valid JSON only, no additional text or markdown formatting.`
 
@@ -602,41 +613,18 @@ function parseTopicFromNote(note: MeetingNote): ExtractedTopic | null {
   try {
     const content = note.content
 
-    // Extract sentiment from tag
-    const sentimentMatch = content.match(/\[(✅|⚠️|📝|🔄)\s+(POSITIVE|NEGATIVE|NEUTRAL|MIXED)\]/)
-    const sentiment: SentimentType = sentimentMatch
-      ? (sentimentMatch[2].toLowerCase() as SentimentType)
-      : 'neutral'
-
     // Extract topic name from heading
     const nameMatch = content.match(/##\s+(.+?)(?=\n|$)/)
     const name = nameMatch ? nameMatch[1].trim() : 'Unnamed Topic'
 
-    // Extract description (first paragraph after heading, before duration)
-    const descMatch = content.match(/##\s+.+?\n\n(.+?)(?=\n\n⏱️|\n\n👥|\n\n###|$)/s)
+    // Extract description (first paragraph after heading, before speakers or decisions)
+    const descMatch = content.match(/##\s+.+?\n\n(.+?)(?=\n\n👥|\n\n###|$)/s)
     const description = descMatch ? descMatch[1].trim() : ''
-
-    // Extract duration and timestamps
-    const durationMatch = content.match(/⏱️\s+Duration:\s+([^\(]+)\s+\((\d{2}:\d{2})\s+-\s+(\d{2}:\d{2})\)/)
-    let durationMs = 0
-    let startTimeMs = 0
-    let endTimeMs = 0
-    if (durationMatch) {
-      startTimeMs = parseTimestampToMs(durationMatch[2])
-      endTimeMs = parseTimestampToMs(durationMatch[3])
-      durationMs = endTimeMs - startTimeMs
-    }
 
     // Extract speakers
     const speakersMatch = content.match(/👥\s+Speakers:\s+(.+?)(?=\n\n|$)/s)
     const speakers = speakersMatch
       ? speakersMatch[1].split(',').map(s => s.trim())
-      : []
-
-    // Extract key points
-    const keyPointsMatch = content.match(/###\s+Key Points:\n((?:•.+\n?)+)/s)
-    const keyPoints = keyPointsMatch
-      ? keyPointsMatch[1].split('\n').map(line => line.replace(/^•\s*/, '').trim()).filter(Boolean)
       : []
 
     // Extract decisions
@@ -648,11 +636,11 @@ function parseTopicFromNote(note: MeetingNote): ExtractedTopic | null {
     return {
       name,
       description,
-      durationMs,
-      startTimeMs,
-      endTimeMs,
-      sentiment,
-      keyPoints,
+      durationMs: 0,
+      startTimeMs: 0,
+      endTimeMs: 0,
+      sentiment: 'neutral',
+      keyPoints: [],
       decisions,
       speakers,
       sourceTranscriptIds: note.source_transcript_ids as string[] | undefined
@@ -860,6 +848,50 @@ ${getModeFilteringInstructions(noteGenerationMode)}`
   }
 
   /**
+   * Get existing cached sentiment for a meeting (if available)
+   */
+  private getCachedSentiment(meetingId: string): {
+    overallSentiment: SentimentType
+    sentimentBreakdown: { positive: number; negative: number; neutral: number; mixed: number }
+  } | null {
+    try {
+      const notes = meetingNoteService.getByMeetingId(meetingId)
+      const sentimentNote = notes.find(n =>
+        n.note_type === 'summary' &&
+        n.is_ai_generated &&
+        n.content.includes('Meeting Sentiment Analysis')
+      )
+
+      if (!sentimentNote) {
+        return null
+      }
+
+      // Parse overall sentiment
+      const overallMatch = sentimentNote.content.match(/\*\*Overall Sentiment:\*\*\s+[^\s]+\s+(\w+)/)
+      const overallSentiment = overallMatch ? (overallMatch[1].toLowerCase() as SentimentType) : 'neutral'
+
+      // Parse sentiment breakdown
+      const positiveMatch = sentimentNote.content.match(/✅ Positive:\s+([\d.]+)%/)
+      const negativeMatch = sentimentNote.content.match(/⚠️ Negative:\s+([\d.]+)%/)
+      const neutralMatch = sentimentNote.content.match(/📝 Neutral:\s+([\d.]+)%/)
+      const mixedMatch = sentimentNote.content.match(/🔄 Mixed:\s+([\d.]+)%/)
+
+      const sentimentBreakdown = {
+        positive: positiveMatch ? parseFloat(positiveMatch[1]) : 25,
+        negative: negativeMatch ? parseFloat(negativeMatch[1]) : 25,
+        neutral: neutralMatch ? parseFloat(neutralMatch[1]) : 25,
+        mixed: mixedMatch ? parseFloat(mixedMatch[1]) : 25
+      }
+
+      console.log('[DecisionsAndTopics] Found cached sentiment:', overallSentiment, sentimentBreakdown)
+      return { overallSentiment, sentimentBreakdown }
+    } catch (error) {
+      console.error('[DecisionsAndTopics] Failed to parse cached sentiment:', error)
+      return null
+    }
+  }
+
+  /**
    * Create meeting notes from extraction results
    */
   private async createNotesFromExtraction(
@@ -925,20 +957,8 @@ ${getModeFilteringInstructions(noteGenerationMode)}`
     for (const topic of extraction.topics) {
       let content = `## ${topic.name}\n\n${topic.description}`
 
-      if (config.includeSentiment) {
-        content = `${formatSentimentTag(topic.sentiment)} ${content}`
-      }
-
-      if (config.includeDuration && topic.durationMs > 0) {
-        content = `${content}\n\n⏱️ Duration: ${formatDuration(topic.durationMs)} (${formatTimestamp(topic.startTimeMs)} - ${formatTimestamp(topic.endTimeMs)})`
-      }
-
       if (topic.speakers.length > 0) {
         content = `${content}\n\n👥 Speakers: ${topic.speakers.join(', ')}`
-      }
-
-      if (topic.keyPoints.length > 0) {
-        content = `${content}\n\n### Key Points:\n${topic.keyPoints.map(p => `• ${p}`).join('\n')}`
       }
 
       if (topic.decisions.length > 0) {
@@ -955,16 +975,35 @@ ${getModeFilteringInstructions(noteGenerationMode)}`
       createdNotes.push(note)
     }
 
-    // Create overall sentiment summary
+    // Create overall sentiment summary with fallback to cached sentiment
+    // First check if LLM returned valid sentiment, otherwise use cached sentiment
+    let overallSentiment = extraction.overallSentiment
+    let sentimentBreakdown = extraction.sentimentBreakdown
+
+    // If LLM didn't return valid sentiment, try to use cached sentiment
+    if (!overallSentiment || overallSentiment === 'neutral' &&
+        sentimentBreakdown.positive === 25 &&
+        sentimentBreakdown.negative === 25 &&
+        sentimentBreakdown.neutral === 25 &&
+        sentimentBreakdown.mixed === 25) {
+      console.log('[DecisionsAndTopics] LLM returned default/missing sentiment, checking for cached sentiment')
+      const cached = this.getCachedSentiment(meetingId)
+      if (cached) {
+        console.log('[DecisionsAndTopics] Using cached sentiment as fallback')
+        overallSentiment = cached.overallSentiment
+        sentimentBreakdown = cached.sentimentBreakdown
+      }
+    }
+
     const sentimentSummary = `## Meeting Sentiment Analysis
 
-**Overall Sentiment:** ${formatSentimentTag(extraction.overallSentiment)} ${extraction.overallSentiment}
+**Overall Sentiment:** ${formatSentimentTag(overallSentiment)} ${overallSentiment}
 
 ### Sentiment Breakdown:
-- ✅ Positive: ${extraction.sentimentBreakdown.positive.toFixed(1)}%
-- ⚠️ Negative: ${extraction.sentimentBreakdown.negative.toFixed(1)}%
-- 📝 Neutral: ${extraction.sentimentBreakdown.neutral.toFixed(1)}%
-- 🔄 Mixed: ${extraction.sentimentBreakdown.mixed.toFixed(1)}%
+- ✅ Positive: ${sentimentBreakdown.positive.toFixed(1)}%
+- ⚠️ Negative: ${sentimentBreakdown.negative.toFixed(1)}%
+- 📝 Neutral: ${sentimentBreakdown.neutral.toFixed(1)}%
+- 🔄 Mixed: ${sentimentBreakdown.mixed.toFixed(1)}%
 
 ### Statistics:
 - Decisions Made: ${extraction.decisions.length}

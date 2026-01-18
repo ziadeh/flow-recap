@@ -420,3 +420,43 @@ export function splitIntoSentences(
   });
   return formatted.split('\n').filter(s => s.trim());
 }
+
+// ============================================================================
+// Note Content Cleaning Utilities
+// ============================================================================
+
+/**
+ * Cleans note content by removing legacy formatting:
+ * - Sentiment tags like [📝 NEUTRAL], [✅ POSITIVE], etc.
+ * - Duration info like "⏱️ Duration: 0m 0s (00:00 - 00:00)"
+ * - Key Points section like "### Key Points:\n• ..."
+ * - Markdown heading markers (## at start of lines)
+ * - Duplicate topic names (when description equals name)
+ */
+export function cleanNoteContent(content: string): string {
+  let cleaned = content
+
+  // Remove sentiment tags: [📝 NEUTRAL], [✅ POSITIVE], [⚠️ NEGATIVE], [🔄 MIXED]
+  cleaned = cleaned.replace(/\[(✅|⚠️|📝|🔄)\s*(POSITIVE|NEGATIVE|NEUTRAL|MIXED)\]\s*/gi, '')
+
+  // Remove ## heading markers at the start of lines
+  cleaned = cleaned.replace(/^##\s+/gm, '')
+
+  // Remove duration info: ⏱️ Duration: 0m 0s (00:00 - 00:00)
+  cleaned = cleaned.replace(/\n*⏱️\s*Duration:[^\n]*/gi, '')
+
+  // Remove Key Points section: ### Key Points:\n• ...
+  cleaned = cleaned.replace(/\n*###\s*Key Points:\n(•[^\n]*\n?)*/gi, '')
+
+  // Remove duplicate content: if the note has "TopicName\n\nTopicName" pattern, simplify it
+  const lines = cleaned.split('\n\n')
+  if (lines.length >= 2 && lines[0].trim() === lines[1].trim()) {
+    lines.splice(1, 1) // Remove the duplicate
+    cleaned = lines.join('\n\n')
+  }
+
+  // Clean up extra whitespace
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim()
+
+  return cleaned
+}

@@ -1,6 +1,6 @@
 import { Sparkles, FileText, BookOpen, CheckCircle, Lightbulb, MessageSquare, Clock } from 'lucide-react'
 import type { MeetingNote, NoteType } from '../../types/database'
-import { formatDateTime } from '../../lib/formatters'
+import { formatDateTime, cleanNoteContent } from '../../lib/formatters'
 
 interface MeetingNotesProps {
   notes: MeetingNote[]
@@ -143,7 +143,7 @@ function NoteCard({ note }: { note: MeetingNote }) {
       </div>
 
       <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
-        {note.content}
+        {cleanNoteContent(note.content)}
       </p>
 
       {note.updated_at !== note.created_at && (

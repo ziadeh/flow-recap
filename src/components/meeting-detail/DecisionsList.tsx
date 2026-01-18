@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import type { MeetingNote } from '../../types/database'
 import type { ExtractedDecision, SentimentType } from '../../types/electron-api'
-import { formatDateTime, formatDurationMs } from '../../lib/formatters'
+import { formatDateTime, formatDurationMs, cleanNoteContent } from '../../lib/formatters'
 
 interface DecisionsListProps {
   /** Decision notes from the meeting */
@@ -170,7 +170,7 @@ function DecisionNoteCard({ note }: { note: MeetingNote }) {
             </span>
           </div>
           <p className="text-sm text-foreground whitespace-pre-wrap">
-            {note.content}
+            {cleanNoteContent(note.content)}
           </p>
         </div>
       </div>

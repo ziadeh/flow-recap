@@ -450,22 +450,13 @@ class LiveNoteGenerationService {
   private formatTopicForStorage(note: LiveNoteItem): string {
     // Use the topic content as both the name and description
     const topicName = note.content
-    const sentiment = '📝 NEUTRAL' // Default neutral sentiment for live topics
 
-    let content = `[${sentiment}] ## ${topicName}\n\n${topicName}`
-
-    // Add timestamp information if available (estimated from extraction time)
-    // This is a placeholder - actual timestamps would come from transcript segments
-    content += '\n\n⏱️ Duration: 0m 0s (00:00 - 00:00)'
+    let content = `## ${topicName}\n\n${topicName}`
 
     // Add speaker if available
     if (note.speaker) {
       content += `\n\n👥 Speakers: ${note.speaker}`
     }
-
-    // Add empty key points section so parser doesn't return empty array
-    // Live topics don't have detailed key points - those come from post-recording extraction
-    content += '\n\n### Key Points:\n• ' + topicName
 
     return content
   }

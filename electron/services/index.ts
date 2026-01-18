@@ -434,6 +434,31 @@ export type {
   ExtractionProcessResult
 } from './decisionsAndTopicsService'
 
+// Unified Insights Service (single button for all insights generation)
+export { unifiedInsightsService } from './unifiedInsightsService'
+export type {
+  InsightSection,
+  SectionProgress,
+  UnifiedGenerationProgress,
+  UnifiedInsightsConfig,
+  ExistingInsightsCounts,
+  SectionResult,
+  UnifiedInsightsResult
+} from './unifiedInsightsService'
+
+// Orchestrated Insights Service (single-pass LLM generation for consistency)
+export { orchestratedInsightsService } from './orchestratedInsightsService'
+export type {
+  ProgressStage,
+  OrchestrationProgress,
+  LLMResponseMetadata,
+  OverviewSection,
+  InsightsSection,
+  OrchestratedResponse,
+  OrchestrationConfig,
+  OrchestrationResult
+} from './orchestratedInsightsService'
+
 // WAV File Utilities (header validation and fixing)
 export {
   validateWavFile,

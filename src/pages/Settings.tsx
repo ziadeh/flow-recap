@@ -17,7 +17,8 @@ import {
   Check,
   Keyboard,
   RotateCcw,
-  Users
+  Users,
+  Bug
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AudioDiagnostics } from '@/components/AudioDiagnostics'
@@ -40,7 +41,7 @@ import {
   CATEGORY_LABELS,
 } from '@/types/keyboard'
 
-type SettingsCategory = 'audio' | 'speaker-id' | 'ai' | 'notifications' | 'appearance' | 'privacy' | 'storage' | 'shortcuts'
+type SettingsCategory = 'audio' | 'speaker-id' | 'ai' | 'notifications' | 'appearance' | 'privacy' | 'storage' | 'shortcuts' | 'developer'
 
 const categories = [
   { id: 'audio' as const, label: 'Audio', icon: Mic, description: 'Recording and playback settings' },
@@ -50,7 +51,11 @@ const categories = [
   { id: 'notifications' as const, label: 'Notifications', icon: Bell, description: 'Alerts and reminders' },
   { id: 'appearance' as const, label: 'Appearance', icon: Palette, description: 'Theme and display options' },
   { id: 'privacy' as const, label: 'Privacy', icon: Shield, description: 'Data and security settings' },
-  { id: 'storage' as const, label: 'Storage', icon: HardDrive, description: 'File storage and backup' }
+  { id: 'storage' as const, label: 'Storage', icon: HardDrive, description: 'File storage and backup' },
+  // Developer category only shown in development mode
+  ...(process.env.NODE_ENV === 'development' ? [
+    { id: 'developer' as const, label: 'Developer', icon: Bug, description: 'Debug tools and diagnostics' }
+  ] : [])
 ]
 
 export function Settings() {
@@ -117,6 +122,7 @@ export function Settings() {
           {activeCategory === 'appearance' && <AppearanceSettings />}
           {activeCategory === 'privacy' && <PrivacySettings />}
           {activeCategory === 'storage' && <StorageSettings />}
+          {activeCategory === 'developer' && <DeveloperSettings />}
         </div>
       </div>
     </div>
@@ -853,6 +859,173 @@ function PrivacySettings() {
             Clear Data
           </button>
         </SettingRow>
+      </SettingsCard>
+    </div>
+  )
+}
+
+function DeveloperSettings() {
+  const [verboseLogging, setVerboseLogging] = useState(() => {
+    return localStorage.getItem('debug.verboseLogging') === 'true'
+  })
+  const [showDebugTestId, setShowDebugTestId] = useState(() => {
+    return localStorage.getItem('debug.showTestId') === 'true'
+  })
+
+  const handleVerboseLoggingChange = (enabled: boolean) => {
+    setVerboseLogging(enabled)
+    localStorage.setItem('debug.verboseLogging', enabled.toString())
+    console.log('[Developer Settings] Verbose logging:', enabled ? 'enabled' : 'disabled')
+  }
+
+  const handleShowDebugTestIdChange = (enabled: boolean) => {
+    setShowDebugTestId(enabled)
+    localStorage.setItem('debug.showTestId', enabled.toString())
+    console.log('[Developer Settings] Show data-testid:', enabled ? 'enabled' : 'disabled')
+  }
+
+  const openOverviewDebugInstructions = () => {
+    console.group('%c[Developer Settings] Overview Tab Debug Instructions', 'color: #8b5cf6; font-weight: bold')
+    console.log('To debug Meeting Summary display issues:')
+    console.log('')
+    console.log('1. Navigate to any meeting detail page')
+    console.log('2. Open browser DevTools (F12 or Cmd+Option+I)')
+    console.log('3. Go to the Console tab')
+    console.log('4. Filter by "[Overview Tab Debug]" or "[MeetingSummary Debug]"')
+    console.log('')
+    console.log('Debug logs will show:')
+    console.log('- Component mount/unmount events')
+    console.log('- Data flow from database to component')
+    console.log('- Section presence and ordering')
+    console.log('- Summary note parsing results')
+    console.log('')
+    console.log('Look for data-testid attributes:')
+    console.log('- meeting-summary-section: Main summary container')
+    console.log('- summary-section-container: Section wrapper')
+    console.log('- meeting-summary-error-boundary: Error state')
+    console.groupEnd()
+
+    alert('Debug instructions have been logged to the browser console. Press F12 to open DevTools.')
+  }
+
+  const triggerTestError = () => {
+    console.error('[Developer Settings] Test error triggered for debugging')
+    // This would need to be connected to a test meeting to see the error boundary
+    alert('Test error logged to console. To see error boundary, navigate to a meeting and check the console.')
+  }
+
+  const clearDebugData = () => {
+    localStorage.removeItem('debug.verboseLogging')
+    localStorage.removeItem('debug.showTestId')
+    setVerboseLogging(false)
+    setShowDebugTestId(false)
+    console.log('[Developer Settings] Debug data cleared')
+    alert('Debug settings have been reset')
+  }
+
+  return (
+    <div className="space-y-6" data-testid="developer-settings">
+      <SettingsCard title="Overview Tab Debugging">
+        <div className="space-y-4">
+          <div className="p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+            <h4 className="font-medium text-purple-700 dark:text-purple-300 mb-2 flex items-center gap-2">
+              <Bug className="w-4 h-4" />
+              Debug Meeting Summary Display
+            </h4>
+            <p className="text-sm text-purple-600 dark:text-purple-400 mb-3">
+              Use browser DevTools to monitor Meeting Summary rendering in the Overview tab.
+              Debug logs are automatically output to the console with detailed timing and data flow information.
+            </p>
+            <button
+              onClick={openOverviewDebugInstructions}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-sm font-medium transition-colors"
+            >
+              View Debug Instructions
+            </button>
+          </div>
+
+          <SettingRow
+            label="Verbose console logging"
+            description="Enable detailed logging for all Overview tab operations"
+          >
+            <Toggle
+              defaultChecked={verboseLogging}
+              onChange={handleVerboseLoggingChange}
+            />
+          </SettingRow>
+
+          <SettingRow
+            label="Highlight data-testid elements"
+            description="Add visual indicators to elements with data-testid attributes"
+          >
+            <Toggle
+              defaultChecked={showDebugTestId}
+              onChange={handleShowDebugTestIdChange}
+            />
+          </SettingRow>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="Debug Actions">
+        <SettingRow
+          label="Test error boundary"
+          description="Trigger a test error to verify error boundary behavior"
+        >
+          <button
+            onClick={triggerTestError}
+            className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm font-medium"
+          >
+            Trigger Test Error
+          </button>
+        </SettingRow>
+
+        <SettingRow
+          label="Clear debug settings"
+          description="Reset all debug preferences to defaults"
+        >
+          <button
+            onClick={clearDebugData}
+            className="px-3 py-1.5 bg-secondary hover:bg-accent text-foreground rounded-md text-sm font-medium"
+          >
+            Clear Settings
+          </button>
+        </SettingRow>
+      </SettingsCard>
+
+      <SettingsCard title="Console Log Prefixes">
+        <div className="space-y-2 text-sm text-muted-foreground">
+          <p>Filter console logs by these prefixes:</p>
+          <ul className="space-y-1 font-mono text-xs">
+            <li className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-cyan-500"></span>
+              <code>[Overview Tab Debug]</code> - MainContentArea component
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-purple-500"></span>
+              <code>[MeetingSummary Debug]</code> - MeetingSummary component
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-red-500"></span>
+              <code>[MeetingSummaryErrorBoundary]</code> - Error boundary
+            </li>
+          </ul>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="Data-testid Reference">
+        <div className="space-y-2 text-sm text-muted-foreground">
+          <p>Use these selectors for automated testing or DOM inspection:</p>
+          <ul className="space-y-1 font-mono text-xs">
+            <li><code>data-testid="meeting-summary-section"</code> - Summary content</li>
+            <li><code>data-testid="summary-section-container"</code> - Section wrapper</li>
+            <li><code>data-testid="meeting-summary-error-boundary"</code> - Error state</li>
+            <li><code>data-testid="main-content-area"</code> - Overview tab container</li>
+            <li><code>data-testid="notes-section"</code> - Notes section</li>
+            <li><code>data-testid="action-items-section"</code> - Action items section</li>
+            <li><code>data-testid="decisions-section"</code> - Decisions section</li>
+            <li><code>data-testid="topics-section"</code> - Topics section</li>
+          </ul>
+        </div>
       </SettingsCard>
     </div>
   )

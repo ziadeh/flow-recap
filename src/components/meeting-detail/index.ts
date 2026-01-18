@@ -16,6 +16,7 @@ export { RecordingsTab } from './RecordingsTab'
 
 // New AI-Generated Content Components
 export { MeetingNotes } from './MeetingNotes'
+export { MeetingSummary } from './MeetingSummary'
 export { ActionItemsList } from './ActionItemsList'
 export { DecisionsList } from './DecisionsList'
 export { TopicsList } from './TopicsList'

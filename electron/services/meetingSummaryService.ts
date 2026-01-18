@@ -130,7 +130,7 @@ TRANSCRIPT:
 
 Generate a JSON response with the following structure:
 {
-  "overallSummary": "A comprehensive 2-4 paragraph summary of the meeting covering the main discussion points, context, and outcomes",
+  "overallSummary": "A concise 3-paragraph summary (250-400 words) covering: what was discussed, key outcomes, and next steps",
   "keyPoints": ["Key point 1", "Key point 2", ...],
   "actionItems": [
     {
@@ -143,8 +143,15 @@ Generate a JSON response with the following structure:
   "topics": ["Topic 1", "Topic 2", ...]
 }
 
-IMPORTANT:
-- overallSummary should be a comprehensive narrative summary
+IMPORTANT - MEETING SUMMARY REQUIREMENTS:
+- overallSummary MUST be exactly 3 paragraphs with 250-400 words total
+- Paragraph 1: Summarize WHAT WAS DISCUSSED (main topics and context)
+- Paragraph 2: Summarize KEY OUTCOMES (decisions made, conclusions reached)
+- Paragraph 3: Summarize NEXT STEPS (action items, follow-ups, future plans)
+- Use clear, professional language suitable for an executive summary
+- Focus on business value and actionable information
+
+OTHER FIELDS:
 - keyPoints should be 3-10 bullet points of the most important information
 - actionItems should only include explicitly stated tasks or commitments
 - decisions should only include explicitly stated decisions
@@ -419,12 +426,20 @@ class MeetingSummaryService {
     const createdNotes: MeetingNote[] = []
 
     // Always create the overall summary note
+    console.log('[MeetingSummary] Creating Meeting Summary note...')
     const summaryNote = meetingNoteService.create({
       meeting_id: meetingId,
       content: summary.overallSummary,
       note_type: 'summary',
       is_ai_generated: true
     })
+    console.log('[MeetingSummary] ✅ Meeting Summary saved to database')
+    console.log('[MeetingSummary] - Table: meeting_notes')
+    console.log('[MeetingSummary] - Note ID:', summaryNote.id)
+    console.log('[MeetingSummary] - Meeting ID:', meetingId)
+    console.log('[MeetingSummary] - Note Type:', summaryNote.note_type)
+    console.log('[MeetingSummary] - Content Length:', summary.overallSummary.length, 'characters')
+    console.log('[MeetingSummary] - Is AI Generated:', summaryNote.is_ai_generated)
     createdNotes.push(summaryNote)
 
     // Create key points as individual notes

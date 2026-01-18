@@ -6,18 +6,15 @@ import {
   User,
   Calendar,
   Clock,
-  Sparkles,
   ListTodo,
   Filter
 } from 'lucide-react'
-import type { Task, TaskPriority, TaskStatus, MeetingNote } from '../../types/database'
+import type { Task, TaskPriority, TaskStatus } from '../../types/database'
 import { formatDate, formatDateTime, isOverdue } from '../../lib/formatters'
 
 interface ActionItemsListProps {
   /** Tasks associated with the meeting */
   tasks: Task[]
-  /** Notes of type 'action_item' from the meeting */
-  actionItemNotes?: MeetingNote[]
   /** Whether to show filter controls (default: true) */
   showFilters?: boolean
   /** Optional callback when task status changes */
@@ -172,41 +169,11 @@ function ActionItemCard({
 }
 
 /**
- * Action item from notes (simple display)
- */
-function ActionItemNoteCard({ note }: { note: MeetingNote }) {
-  return (
-    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-      <div className="flex items-start gap-3">
-        <CheckCircle className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-2">
-            {note.is_ai_generated && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 border border-purple-200">
-                <Sparkles className="w-3 h-3 mr-1" />
-                AI Extracted
-              </span>
-            )}
-            <span className="text-xs text-muted-foreground">
-              {formatDateTime(note.created_at)}
-            </span>
-          </div>
-          <p className="text-sm text-foreground whitespace-pre-wrap">
-            {note.content}
-          </p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/**
  * ActionItemsList Component
  * Displays extracted action items and tasks in an organized list
  */
 export function ActionItemsList({
   tasks,
-  actionItemNotes = [],
   showFilters = true,
   onTaskStatusChange
 }: ActionItemsListProps) {
@@ -244,9 +211,7 @@ export function ActionItemsList({
     overdue: tasks.filter(t => t.due_date && t.status !== 'completed' && isOverdue(t.due_date)).length,
   }
 
-  const hasItems = tasks.length > 0 || actionItemNotes.length > 0
-
-  if (!hasItems) {
+  if (tasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <ListTodo className="w-12 h-12 text-muted-foreground mb-4" />
@@ -345,26 +310,6 @@ export function ActionItemsList({
       {tasks.length > 0 && filteredTasks.length === 0 && (
         <div className="text-center py-8 text-muted-foreground mb-8">
           No action items match the selected filter.
-        </div>
-      )}
-
-      {/* Action item notes (if any that weren't converted to tasks) */}
-      {actionItemNotes.length > 0 && (
-        <div>
-          <div className="flex items-center mb-4">
-            <Sparkles className="w-5 h-5 mr-2 text-purple-600" />
-            <h3 className="text-lg font-semibold text-foreground">
-              AI-Extracted Action Items
-            </h3>
-            <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold bg-muted text-muted-foreground">
-              {actionItemNotes.length}
-            </span>
-          </div>
-          <div className="space-y-3">
-            {actionItemNotes.map((note) => (
-              <ActionItemNoteCard key={note.id} note={note} />
-            ))}
-          </div>
         </div>
       )}
     </div>

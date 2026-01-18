@@ -6,11 +6,51 @@ export default {
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
+    // Custom breakpoints matching feature requirements
+    // Mobile: < 768px, Tablet: 768-1024px, Desktop: > 1024px
+    screens: {
+      'sm': '640px',      // small mobile landscape
+      'md': '768px',      // tablet breakpoint
+      'lg': '1024px',     // desktop breakpoint
+      'xl': '1280px',     // large desktop
+      '2xl': '1536px',    // extra large desktop
+    },
     extend: {
+      // Design token system for consistent spacing
+      // Spacing scale: xs=4px, sm=8px, md=12px, lg=16px, xl=24px, 2xl=32px
+      spacing: {
+        'token-xs': 'var(--spacing-xs)',   // 4px - minimal spacing
+        'token-sm': 'var(--spacing-sm)',   // 8px - row spacing, button padding
+        'token-md': 'var(--spacing-md)',   // 12px - section spacing, header margin
+        'token-lg': 'var(--spacing-lg)',   // 16px - card padding, max section gap
+        'token-xl': 'var(--spacing-xl)',   // 24px - primary action icon size
+        'token-2xl': 'var(--spacing-2xl)', // 32px - large spacing
+        'touch': '44px',                   // minimum touch target size (44px)
+      },
+      // Minimum height for touch targets (44px per WCAG guidelines)
+      minHeight: {
+        'touch': '44px',
+      },
+      minWidth: {
+        'touch': '44px',
+      },
+      // Border radius tokens
       borderRadius: {
         lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        md: "var(--radius-md)",
+        sm: "var(--radius-sm)",
+        'token': 'var(--radius-md)', // default token radius = 8px
+      },
+      // Box shadow tokens for elevation
+      boxShadow: {
+        'subtle': 'var(--shadow-subtle)',      // elevation level 1
+        'medium': 'var(--shadow-medium)',      // elevation level 2
+        'elevated': 'var(--shadow-elevated)',  // elevation level 3
+      },
+      // Icon size tokens
+      fontSize: {
+        'icon-inline': ['1rem', { lineHeight: '1' }],     // 16px for inline icons
+        'icon-primary': ['1.5rem', { lineHeight: '1' }],  // 24px for primary action icons
       },
       keyframes: {
         "slide-in-fade": {

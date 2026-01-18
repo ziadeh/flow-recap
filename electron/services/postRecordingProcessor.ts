@@ -13,8 +13,9 @@ import { mlPipelineService, TranscriptionConfig } from './mlPipeline'
 import { transcriptService } from './transcriptService'
 import { getDatabaseService } from './database'
 import { actionItemsService, ActionItemsExtractionResult } from './actionItemsService'
+import { meetingSummaryService } from './meetingSummaryService'
 import { settingsService } from './settingsService'
-import type { Meeting, Task } from '../../src/types/database'
+import type { Meeting, Task, MeetingNote } from '../../src/types/database'
 
 export interface PostRecordingOptions {
   /** Whether to run diarization (default: true) */
@@ -23,6 +24,8 @@ export interface PostRecordingOptions {
   runTranscription?: boolean
   /** Whether to auto-extract action items after processing (default: uses setting) */
   autoExtractActionItems?: boolean
+  /** Whether to auto-generate meeting summary after processing (default: uses setting) */
+  autoGenerateSummary?: boolean
   /** Transcription config */
   transcriptionConfig?: TranscriptionConfig
   /** Diarization config */
@@ -35,10 +38,12 @@ export interface PostRecordingResult {
   diarizationCompleted: boolean
   transcriptionCompleted: boolean
   actionItemsExtracted: boolean
+  summaryGenerated: boolean
   speakersDetected?: number
   transcriptsCreated?: number
   tasksCreated?: Task[]
   actionItemsCount?: number
+  summaryNotesCreated?: MeetingNote[]
   error?: string
 }
 
@@ -51,13 +56,15 @@ export async function processRecording(
   audioFilePath: string,
   options: PostRecordingOptions = {}
 ): Promise<PostRecordingResult> {
-  // Get auto-extract setting from settings service (defaults to true)
+  // Get settings from settings service (defaults to true)
   const autoExtractFromSettings = settingsService.getOrDefault<boolean>('ai.autoExtractActionItems', true)
+  const autoGenerateSummaryFromSettings = settingsService.getOrDefault<boolean>('ai.autoGenerateSummary', true)
 
   const {
     runDiarization = true,
     runTranscription = true,
     autoExtractActionItems = autoExtractFromSettings,
+    autoGenerateSummary = autoGenerateSummaryFromSettings,
     transcriptionConfig = {},
     diarizationOptions = {}
   } = options
@@ -67,7 +74,8 @@ export async function processRecording(
     meetingId,
     diarizationCompleted: false,
     transcriptionCompleted: false,
-    actionItemsExtracted: false
+    actionItemsExtracted: false,
+    summaryGenerated: false
   }
 
   try {
@@ -189,6 +197,44 @@ export async function processRecording(
       }
     } else if (!autoExtractActionItems) {
       console.log('[PostRecordingProcessor] Auto-extract action items is disabled')
+    }
+
+    // Step 4: Automatically generate meeting summary (if enabled)
+    // This runs after diarization/transcription is complete and creates a summary for the Overview tab
+    if (autoGenerateSummary && (result.transcriptionCompleted || result.diarizationCompleted)) {
+      console.log('[PostRecordingProcessor] Auto-generating meeting summary...')
+      try {
+        // Check if LLM is available
+        const availability = await meetingSummaryService.checkAvailability()
+
+        if (availability.available) {
+          console.log(`[PostRecordingProcessor] LLM available (${availability.modelInfo}), generating meeting summary...`)
+
+          const summaryResult = await meetingSummaryService.generateSummary(meetingId)
+
+          if (summaryResult.success) {
+            result.summaryGenerated = true
+            result.summaryNotesCreated = summaryResult.createdNotes
+
+            console.log(`[PostRecordingProcessor] Meeting summary generation complete:`, {
+              summaryNotesCreated: summaryResult.createdNotes?.length || 0,
+              processingTimeMs: summaryResult.metadata.processingTimeMs,
+              keyPointsCount: summaryResult.summary?.keyPoints?.length || 0,
+              decisionsCount: summaryResult.summary?.decisions?.length || 0
+            })
+          } else {
+            console.warn('[PostRecordingProcessor] Meeting summary generation failed:', summaryResult.error)
+            // Don't set result.error - summary generation failure is not critical
+          }
+        } else {
+          console.log('[PostRecordingProcessor] LLM not available for meeting summary generation:', availability.error)
+        }
+      } catch (error) {
+        console.error('[PostRecordingProcessor] Meeting summary generation error:', error)
+        // Don't set result.error - summary generation failure is not critical
+      }
+    } else if (!autoGenerateSummary) {
+      console.log('[PostRecordingProcessor] Auto-generate meeting summary is disabled')
     }
 
     result.success = result.diarizationCompleted || result.transcriptionCompleted

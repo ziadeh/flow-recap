@@ -119,6 +119,8 @@ import {
   meetingSummaryService,
   actionItemsService,
   decisionsAndTopicsService,
+  unifiedInsightsService,
+  orchestratedInsightsService,
   exportService,
   updateService,
   llmProviderManager,
@@ -151,6 +153,8 @@ import type {
   SummaryGenerationConfig,
   ActionItemsExtractionConfig,
   DecisionsAndTopicsConfig,
+  UnifiedInsightsConfig,
+  OrchestrationConfig,
   LiveNoteGenerationConfig,
   LiveNoteTranscriptInput,
   SubjectAwareConfig,
@@ -1045,11 +1049,19 @@ function setupRecordingIPC() {
           }
         }
 
-        // Run diarization and action items extraction in the background (don't block the UI)
+        // Run diarization, action items extraction, and summary generation in the background (don't block the UI)
+        // Notify frontend that summary generation is starting
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('recording:summaryGenerationStart', {
+            meetingId: result.meetingId
+          })
+        }
+
         postRecordingProcessor.processRecording(result.meetingId, result.audioFilePath, {
           runDiarization: true,
           runTranscription: false // Transcription already done via live transcription
           // autoExtractActionItems will use the setting value by default
+          // autoGenerateSummary will use the setting value by default
         }).then(processingResult => {
           console.log('[Main] Post-recording processing complete:', processingResult)
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1069,9 +1081,33 @@ function setupRecordingIPC() {
                 tasksCreated: processingResult.tasksCreated || []
               })
             }
+
+            // Notify frontend about auto-generated meeting summary
+            if (processingResult.summaryGenerated) {
+              mainWindow.webContents.send('recording:summaryGenerated', {
+                meetingId: result.meetingId,
+                success: true,
+                notesCreated: processingResult.summaryNotesCreated || []
+              })
+            } else if (processingResult.error) {
+              // Notify frontend about summary generation failure
+              mainWindow.webContents.send('recording:summaryGenerationFailed', {
+                meetingId: result.meetingId,
+                error: processingResult.error,
+                errorType: 'unknown'
+              })
+            }
           }
         }).catch(err => {
           console.error('[Main] Post-recording processing failed:', err)
+          // Notify frontend about summary generation failure
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('recording:summaryGenerationFailed', {
+              meetingId: result.meetingId,
+              error: err instanceof Error ? err.message : String(err),
+              errorType: 'unknown'
+            })
+          }
         })
       }
 
@@ -2962,6 +2998,14 @@ function setupModelManagerIPC() {
     config?: SummaryGenerationConfig
   ) => {
     console.log('[Main] meetingSummary:generateSummary', { meetingId, config })
+
+    // Notify frontend that summary generation is starting
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('recording:summaryGenerationStart', {
+        meetingId
+      })
+    }
+
     try {
       const startTime = Date.now()
       const result = await meetingSummaryService.generateSummary(meetingId, config)
@@ -2971,9 +3015,37 @@ function setupModelManagerIPC() {
         notesCreated: result.createdNotes?.length,
         transcriptSegments: result.metadata.transcriptSegmentCount
       })
+
+      // Notify frontend about the result
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (result.success) {
+          mainWindow.webContents.send('recording:summaryGenerated', {
+            meetingId,
+            success: true,
+            notesCreated: result.createdNotes || []
+          })
+        } else {
+          mainWindow.webContents.send('recording:summaryGenerationFailed', {
+            meetingId,
+            error: result.error || 'Failed to generate summary',
+            errorType: result.error?.includes('transcript') ? 'no_transcript' : 'unknown'
+          })
+        }
+      }
+
       return result
     } catch (err) {
       console.error('[Main] Meeting summary generation error:', err)
+
+      // Notify frontend about the failure
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('recording:summaryGenerationFailed', {
+          meetingId,
+          error: err instanceof Error ? err.message : String(err),
+          errorType: 'unknown'
+        })
+      }
+
       return {
         success: false,
         error: err instanceof Error ? err.message : String(err),
@@ -3258,6 +3330,209 @@ function setupModelManagerIPC() {
       return {
         success: false,
         topics: [],
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // ============================================================================
+  // Unified Insights Service IPC Handlers
+  // ============================================================================
+
+  // Check if LLM service is available for unified insights generation
+  ipcMain.handle('unifiedInsights:checkAvailability', async () => {
+    console.log('[Main] unifiedInsights:checkAvailability')
+    try {
+      const result = await unifiedInsightsService.checkAvailability()
+      console.log('[Main] unifiedInsights:checkAvailability result:', result)
+      return result
+    } catch (err) {
+      console.error('[Main] Check unified insights availability error:', err)
+      return {
+        available: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Get existing insights counts for confirmation dialog
+  ipcMain.handle('unifiedInsights:getExistingCounts', async (
+    _event,
+    meetingId: string
+  ) => {
+    console.log('[Main] unifiedInsights:getExistingCounts', { meetingId })
+    try {
+      const counts = await unifiedInsightsService.getExistingInsightsCounts(meetingId)
+      console.log('[Main] unifiedInsights:getExistingCounts result:', counts)
+      return { success: true, counts }
+    } catch (err) {
+      console.error('[Main] Get existing insights counts error:', err)
+      return {
+        success: false,
+        counts: null,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Delete all existing insights for a meeting
+  ipcMain.handle('unifiedInsights:deleteExisting', async (
+    _event,
+    meetingId: string,
+    options?: { preserveSentiment?: boolean }
+  ) => {
+    console.log('[Main] unifiedInsights:deleteExisting', { meetingId, options })
+    try {
+      const result = await unifiedInsightsService.deleteExistingInsights(meetingId, options)
+      console.log('[Main] unifiedInsights:deleteExisting result:', result)
+      return { success: true, ...result }
+    } catch (err) {
+      console.error('[Main] Delete existing insights error:', err)
+      return {
+        success: false,
+        deleted: 0,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Generate all insights in one unified operation
+  ipcMain.handle('unifiedInsights:generateAll', async (
+    _event,
+    meetingId: string,
+    config?: UnifiedInsightsConfig
+  ) => {
+    console.log('[Main] unifiedInsights:generateAll', { meetingId, config })
+    try {
+      const startTime = Date.now()
+      const result = await unifiedInsightsService.generateAllInsights(meetingId, config)
+      console.log('[Main] unifiedInsights:generateAll result:', {
+        success: result.success,
+        partialSuccess: result.partialSuccess,
+        sectionsCompleted: result.metadata.sectionsCompleted,
+        sectionsFailed: result.metadata.sectionsFailed,
+        processingTimeMs: Date.now() - startTime
+      })
+      return result
+    } catch (err) {
+      console.error('[Main] Generate all insights error:', err)
+      return {
+        success: false,
+        partialSuccess: false,
+        error: err instanceof Error ? err.message : String(err),
+        sectionResults: [],
+        createdNotes: [],
+        createdTasks: [],
+        metadata: {
+          totalProcessingTimeMs: 0,
+          sectionsCompleted: 0,
+          sectionsFailed: 0,
+          noteGenerationMode: 'strict'
+        }
+      }
+    }
+  })
+
+  // Get current unified insights configuration
+  ipcMain.handle('unifiedInsights:getConfig', async () => {
+    console.log('[Main] unifiedInsights:getConfig')
+    return unifiedInsightsService.getConfig()
+  })
+
+  // Update unified insights configuration
+  ipcMain.handle('unifiedInsights:updateConfig', async (
+    _event,
+    config: Partial<UnifiedInsightsConfig>
+  ) => {
+    console.log('[Main] unifiedInsights:updateConfig', config)
+    try {
+      unifiedInsightsService.updateConfig(config)
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Update unified insights config error:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // ============================================================================
+  // Orchestrated Insights Service IPC Handlers
+  // ============================================================================
+
+  // Check if LLM service is available for orchestrated insights generation
+  ipcMain.handle('orchestratedInsights:checkAvailability', async () => {
+    console.log('[Main] orchestratedInsights:checkAvailability')
+    try {
+      const result = await orchestratedInsightsService.checkAvailability()
+      console.log('[Main] orchestratedInsights:checkAvailability result:', result)
+      return result
+    } catch (err) {
+      console.error('[Main] Check orchestrated insights availability error:', err)
+      return {
+        available: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Generate all insights using orchestrated approach
+  ipcMain.handle('orchestratedInsights:generateAll', async (
+    _event,
+    meetingId: string,
+    config?: OrchestrationConfig
+  ) => {
+    console.log('[Main] orchestratedInsights:generateAll', { meetingId, config })
+    try {
+      const startTime = Date.now()
+      const result = await orchestratedInsightsService.generateAllInsights(meetingId, config)
+      console.log('[Main] orchestratedInsights:generateAll result:', {
+        success: result.success,
+        createdNotesCount: result.createdNotes.length,
+        createdTasksCount: result.createdTasks.length,
+        processingTimeMs: Date.now() - startTime,
+        metadata: result.metadata
+      })
+      return result
+    } catch (err) {
+      console.error('[Main] Generate orchestrated insights error:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+        createdNotes: [],
+        createdTasks: [],
+        metadata: {
+          model: 'N/A',
+          provider: 'N/A',
+          generationTimeMs: 0,
+          retryCount: 0,
+          fallbackUsed: false,
+          validationAttempts: 0
+        }
+      }
+    }
+  })
+
+  // Get current orchestrated insights configuration
+  ipcMain.handle('orchestratedInsights:getConfig', async () => {
+    console.log('[Main] orchestratedInsights:getConfig')
+    return orchestratedInsightsService.getConfig()
+  })
+
+  // Update orchestrated insights configuration
+  ipcMain.handle('orchestratedInsights:updateConfig', async (
+    _event,
+    config: Partial<OrchestrationConfig>
+  ) => {
+    console.log('[Main] orchestratedInsights:updateConfig', config)
+    try {
+      orchestratedInsightsService.updateConfig(config)
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Update orchestrated insights config error:', err)
+      return {
+        success: false,
         error: err instanceof Error ? err.message : String(err)
       }
     }

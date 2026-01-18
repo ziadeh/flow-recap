@@ -29,6 +29,10 @@ export type { IndividualSpeakerBoxViewerProps } from './IndividualSpeakerBoxView
 export { ChatStyleTranscriptViewer } from './ChatStyleTranscriptViewer'
 export type { ChatStyleTranscriptViewerProps } from './ChatStyleTranscriptViewer'
 
+// Collapsible Transcript Section
+export { CollapsibleTranscriptSection } from './CollapsibleTranscriptSection'
+export type { CollapsibleTranscriptSectionProps, SortOption } from './CollapsibleTranscriptSection'
+
 // Search Components
 export { TranscriptSearch, useTranscriptSearch, HighlightedText } from './TranscriptSearch'
 export type { TranscriptSearchProps, HighlightedTextProps, SearchState } from './TranscriptSearch'

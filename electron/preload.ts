@@ -373,6 +373,33 @@ const recordingAPI = {
     return () => {
       ipcRenderer.removeListener('recording:actionItemsExtracted', handler)
     }
+  },
+  onSummaryGenerated: (callback: (data: { meetingId: string; success: boolean; notesCreated: Array<{ id: string; content: string; note_type: string }> }) => void): (() => void) => {
+    const handler = (_event: unknown, data: { meetingId: string; success: boolean; notesCreated: Array<{ id: string; content: string; note_type: string }> }) => {
+      callback(data)
+    }
+    ipcRenderer.on('recording:summaryGenerated', handler)
+    return () => {
+      ipcRenderer.removeListener('recording:summaryGenerated', handler)
+    }
+  },
+  onSummaryGenerationStart: (callback: (data: { meetingId: string }) => void): (() => void) => {
+    const handler = (_event: unknown, data: { meetingId: string }) => {
+      callback(data)
+    }
+    ipcRenderer.on('recording:summaryGenerationStart', handler)
+    return () => {
+      ipcRenderer.removeListener('recording:summaryGenerationStart', handler)
+    }
+  },
+  onSummaryGenerationFailed: (callback: (data: { meetingId: string; error: string; errorType?: string; details?: string }) => void): (() => void) => {
+    const handler = (_event: unknown, data: { meetingId: string; error: string; errorType?: string; details?: string }) => {
+      callback(data)
+    }
+    ipcRenderer.on('recording:summaryGenerationFailed', handler)
+    return () => {
+      ipcRenderer.removeListener('recording:summaryGenerationFailed', handler)
+    }
   }
 }
 
@@ -2440,6 +2467,213 @@ const decisionsAndTopicsAPI = {
     topics: ExtractedTopic[]
     error?: string
   }> => ipcRenderer.invoke('decisionsAndTopics:getTopicsWithDetails', meetingId)
+}
+
+// ============================================================================
+// Unified Insights API (single button for all insights generation)
+// ============================================================================
+
+/**
+ * Section names for unified insights generation
+ */
+export type InsightSection =
+  | 'summary'
+  | 'keyPoints'
+  | 'decisions'
+  | 'actionItems'
+  | 'topics'
+  | 'sentiment'
+
+/**
+ * Progress update for each section
+ */
+export interface SectionProgress {
+  section: InsightSection
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+  error?: string
+}
+
+/**
+ * Overall progress for unified generation
+ */
+export interface UnifiedGenerationProgress {
+  totalSections: number
+  completedSections: number
+  currentSection: InsightSection | null
+  sections: SectionProgress[]
+  overallStatus: 'pending' | 'in_progress' | 'completed' | 'partial_success' | 'failed'
+}
+
+/**
+ * Configuration for unified insights generation
+ */
+export interface UnifiedInsightsConfig {
+  maxTokens?: number
+  temperature?: number
+  noteGenerationMode?: 'strict' | 'balanced' | 'loose'
+  createTasks?: boolean
+}
+
+/**
+ * Existing insights counts for confirmation dialog
+ */
+export interface ExistingInsightsCounts {
+  actionItems: number
+  decisions: number
+  keyPoints: number
+  topics: number
+  summaries: number
+  sentiment: number
+  total: number
+}
+
+/**
+ * Result of a single section generation
+ */
+export interface SectionResult {
+  section: InsightSection
+  success: boolean
+  error?: string
+  createdNotes?: MeetingNote[]
+  createdTasks?: Task[]
+  processingTimeMs: number
+}
+
+/**
+ * Result of unified insights generation
+ */
+export interface UnifiedInsightsResult {
+  success: boolean
+  partialSuccess: boolean
+  error?: string
+  sectionResults: SectionResult[]
+  createdNotes: MeetingNote[]
+  createdTasks: Task[]
+  metadata: {
+    totalProcessingTimeMs: number
+    sectionsCompleted: number
+    sectionsFailed: number
+    noteGenerationMode: 'strict' | 'balanced' | 'loose'
+  }
+}
+
+const unifiedInsightsAPI = {
+  // Check if LLM service is available for unified insights generation
+  checkAvailability: (): Promise<{
+    available: boolean
+    error?: string
+    modelInfo?: string
+  }> => ipcRenderer.invoke('unifiedInsights:checkAvailability'),
+
+  // Get existing insights counts for confirmation dialog
+  getExistingCounts: (meetingId: string): Promise<{
+    success: boolean
+    counts: ExistingInsightsCounts | null
+    error?: string
+  }> => ipcRenderer.invoke('unifiedInsights:getExistingCounts', meetingId),
+
+  // Delete all existing insights for a meeting
+  deleteExisting: (
+    meetingId: string,
+    options?: { preserveSentiment?: boolean }
+  ): Promise<{
+    success: boolean
+    deleted: number
+    preservedSentiment?: boolean
+    error?: string
+  }> => ipcRenderer.invoke('unifiedInsights:deleteExisting', meetingId, options),
+
+  // Generate all insights in one unified operation
+  generateAll: (
+    meetingId: string,
+    config?: UnifiedInsightsConfig
+  ): Promise<UnifiedInsightsResult> =>
+    ipcRenderer.invoke('unifiedInsights:generateAll', meetingId, config),
+
+  // Get current unified insights configuration
+  getConfig: (): Promise<UnifiedInsightsConfig> =>
+    ipcRenderer.invoke('unifiedInsights:getConfig'),
+
+  // Update unified insights configuration
+  updateConfig: (
+    config: Partial<UnifiedInsightsConfig>
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('unifiedInsights:updateConfig', config)
+}
+
+// ============================================================================
+// Orchestrated Insights API (Single-Pass LLM Generation)
+// ============================================================================
+
+export type ProgressStage =
+  | 'analyzing_transcript'
+  | 'generating_overview'
+  | 'extracting_insights'
+  | 'validating_response'
+  | 'retrying_generation'
+  | 'falling_back_sequential'
+  | 'finalizing'
+  | 'completed'
+  | 'failed'
+
+export interface OrchestrationProgress {
+  stage: ProgressStage
+  message: string
+  percentage: number
+  timestamp: number
+}
+
+export interface LLMResponseMetadata {
+  model: string
+  provider: string
+  tokensConsumed?: number
+  generationTimeMs: number
+  retryCount: number
+  fallbackUsed: boolean
+  validationAttempts: number
+}
+
+export interface OrchestrationConfig {
+  maxTokens?: number
+  temperature?: number
+  timeoutMs?: number
+  maxRetries?: number
+  createTasks?: boolean
+  noteGenerationMode?: 'strict' | 'balanced' | 'loose'
+}
+
+export interface OrchestrationResult {
+  success: boolean
+  error?: string
+  createdNotes: MeetingNote[]
+  createdTasks: Task[]
+  metadata: LLMResponseMetadata
+}
+
+const orchestratedInsightsAPI = {
+  // Check if LLM service is available for orchestrated insights generation
+  checkAvailability: (): Promise<{
+    available: boolean
+    error?: string
+    modelInfo?: string
+  }> => ipcRenderer.invoke('orchestratedInsights:checkAvailability'),
+
+  // Generate all insights using orchestrated approach (single LLM call)
+  generateAll: (
+    meetingId: string,
+    config?: OrchestrationConfig
+  ): Promise<OrchestrationResult> =>
+    ipcRenderer.invoke('orchestratedInsights:generateAll', meetingId, config),
+
+  // Get current orchestrated insights configuration
+  getConfig: (): Promise<OrchestrationConfig> =>
+    ipcRenderer.invoke('orchestratedInsights:getConfig'),
+
+  // Update orchestrated insights configuration
+  updateConfig: (
+    config: Partial<OrchestrationConfig>
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('orchestratedInsights:updateConfig', config)
 }
 
 // ============================================================================
@@ -4554,6 +4788,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Decisions and Topics Extraction API (LLM-based decisions, key points, and topics with sentiment)
   decisionsAndTopics: decisionsAndTopicsAPI,
 
+  // Unified Insights API (single button for all insights generation)
+  unifiedInsights: unifiedInsightsAPI,
+
+  // Orchestrated Insights API (single-pass LLM generation for consistency)
+  orchestratedInsights: orchestratedInsightsAPI,
+
   // Export API (PDF and Markdown export)
   export: exportAPI,
 
@@ -4638,6 +4878,8 @@ declare global {
       meetingSummary: typeof meetingSummaryAPI
       actionItems: typeof actionItemsAPI
       decisionsAndTopics: typeof decisionsAndTopicsAPI
+      unifiedInsights: typeof unifiedInsightsAPI
+      orchestratedInsights: typeof orchestratedInsightsAPI
       export: typeof exportAPI
       update: typeof updateAPI
       shell: typeof shellAPI
