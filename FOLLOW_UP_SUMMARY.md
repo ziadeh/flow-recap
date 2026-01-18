@@ -56,7 +56,7 @@ cd python
 ```
 
 **Benefits of dual environment:**
-- Separate torch versions for WhisperX (2.8) and Pyannote (2.5.1)
+- Separate torch versions for WhisperX (2.5.0) and Pyannote (2.5.1)
 - No version conflicts
 - Maximum stability
 

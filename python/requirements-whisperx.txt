@@ -3,10 +3,10 @@
 # =============================================================================
 #
 # Purpose: Speech-to-text transcription with word-level timestamps
-# PyTorch Version: 2.8.0 (REQUIRED - WhisperX optimized for latest torch)
+# PyTorch Version: 2.5.0 (REQUIRED - WhisperX compatible version)
 # Python Version: 3.10+ (3.12 recommended)
 #
-# IMPORTANT: This environment uses torch 2.8.0 which is REQUIRED for WhisperX
+# IMPORTANT: This environment uses torch 2.5.0 which is compatible with WhisperX
 # Do NOT mix with pyannote.audio which requires torch 2.5.1
 # Use venv-whisperx for transcription operations only.
 #
@@ -50,14 +50,14 @@ transformers>=4.40
 # PyTorch Ecosystem (WhisperX Version)
 # -----------------------------------------------------------------------------
 
-# PyTorch 2.8.0 - REQUIRED VERSION for WhisperX compatibility
-# WhisperX requires the latest torch for optimal performance
+# PyTorch 2.5.0 - REQUIRED VERSION for WhisperX compatibility
+# WhisperX works with recent stable PyTorch versions
 # Features: improved attention mechanisms, better memory efficiency
-torch==2.8.0
+torch==2.5.0
 
 # torchaudio - PyTorch audio processing
-# Must match PyTorch version exactly (2.8.0 to match torch)
-torchaudio==2.8.0
+# Must match PyTorch version exactly (2.5.0 to match torch)
+torchaudio==2.5.0
 
 # -----------------------------------------------------------------------------
 # Audio Processing Libraries

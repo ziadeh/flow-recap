@@ -28,8 +28,8 @@ python/
 
 | Environment | PyTorch Version | Reason |
 |-------------|-----------------|--------|
-| WhisperX | `torch==2.8.0` | WhisperX optimized for latest torch; requires newer attention mechanisms and memory management |
-| Pyannote | `torch==2.5.1` | Pyannote models use `weights_only=False` for loading; torch 2.8+ defaults to `weights_only=True` causing load failures |
+| WhisperX | `torch==2.5.0` | WhisperX compatible with recent stable PyTorch versions |
+| Pyannote | `torch==2.5.1` | Pyannote models require stable PyTorch with `weights_only=False` support |
 
 **Root Cause**: PyTorch 2.6+ changed the default behavior of `torch.load()` to use `weights_only=True` for security. Pyannote models were serialized with additional metadata that requires `weights_only=False`.
 
@@ -168,7 +168,7 @@ pip install -r requirements-pyannote.lock
 
 ### Strategy 3: Model Re-serialization (Future)
 
-**Approach**: Re-save pyannote models with torch 2.8+ compatible format.
+**Approach**: Re-save pyannote models with newer torch compatible format.
 
 **Status**: Not yet implemented; requires upstream changes or local model conversion.
 
@@ -237,7 +237,7 @@ Both environments are tested in CI/CD:
     python -m venv venv-whisperx
     source venv-whisperx/bin/activate
     pip install -r requirements-whisperx.txt
-    python -c "import whisperx; import torch; assert torch.__version__.startswith('2.8')"
+    python -c "import whisperx; import torch; assert torch.__version__.startswith('2.5')"
 
 - name: Validate Pyannote Environment
   run: |

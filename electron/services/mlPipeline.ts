@@ -202,7 +202,7 @@ function getPythonScriptsDir(): string {
 /**
  * Find the Python executable path for a specific purpose
  * Uses the dual environment system when available:
- * - venv-whisperx: Python 3.12 + WhisperX + torch 2.8 (for transcription)
+ * - venv-whisperx: Python 3.12 + WhisperX + torch 2.5.0 (for transcription)
  * - venv-pyannote: Python 3.12 + Pyannote + torch 2.5.1 (for diarization)
  * Supports multiple virtual environment directories as fallback
  *
@@ -698,7 +698,7 @@ export const mlPipelineService = {
       args.push('--stats')
 
       // Run diarization using Pyannote environment
-      // This uses venv-pyannote with torch 2.5.1 to avoid conflicts with WhisperX's torch 2.8
+      // This uses venv-pyannote with torch 2.5.1 to avoid conflicts with WhisperX's torch 2.5.0
       job.phase = 'diarization'
       const output = await spawnPythonProcess('diarize.py', args, jobId, DEFAULT_TIMEOUT, 'diarization')
 

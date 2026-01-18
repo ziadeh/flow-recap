@@ -29,11 +29,11 @@ speechbrain>=1.0.0
 ffmpeg-python>=0.2.0
 
 # Additional dependencies for audio processing
-# PyTorch 2.8.0 with patched huggingface_hub for compatibility
+# PyTorch 2.5.0 with patched huggingface_hub for compatibility
 # The huggingface_hub library was patched to use weights_only=False in hub_mixin.py
-# to allow pyannote models to load with PyTorch 2.8.0
-torch==2.8.0
-torchaudio==2.8.0
+# to allow pyannote models to load with PyTorch 2.5+
+torch==2.5.0
+torchaudio==2.5.0
 
 # Numpy for numerical operations
 numpy>=1.24.0

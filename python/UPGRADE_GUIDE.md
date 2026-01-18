@@ -40,7 +40,7 @@ This guide explains how to safely update Python dependencies while maintaining c
 
 | File | Purpose | Critical Constraints |
 |------|---------|---------------------|
-| `requirements-whisperx.txt` | Transcription | `torch==2.8.0`, `numpy<2.0` |
+| `requirements-whisperx.txt` | Transcription | `torch==2.5.0`, `numpy<2.0` |
 | `requirements-pyannote.txt` | Diarization | `torch==2.5.1`, `pytorch-lightning==2.6.0` |
 | `requirements-common.txt` | Shared utilities | Version-agnostic |
 
@@ -109,7 +109,7 @@ pip freeze > requirements-whisperx.lock
 
 **⚠️ CAUTION**: PyTorch upgrades require careful consideration due to the version conflict between WhisperX and Pyannote.
 
-### WhisperX Environment (torch 2.8.x)
+### WhisperX Environment (torch 2.5.x)
 
 1. **Check WhisperX compatibility**:
    - Visit https://github.com/m-bain/whisperX/releases
@@ -117,8 +117,8 @@ pip freeze > requirements-whisperx.lock
 
 2. **Update requirements-whisperx.txt**:
    ```
-   torch==2.9.0  # New version
-   torchaudio==2.9.0  # Must match torch major.minor
+   torch==2.6.0  # New version
+   torchaudio==2.6.0  # Must match torch major.minor
    ```
 
 3. **Test thoroughly**:

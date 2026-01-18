@@ -2,7 +2,7 @@
  * Dual Python Environment Service
  *
  * Manages two isolated Python virtual environments to resolve torch version conflicts:
- * - venv-whisperx: Python 3.12 + WhisperX + torch 2.8 (for transcription)
+ * - venv-whisperx: Python 3.12 + WhisperX + torch 2.5.0 (for transcription)
  * - venv-pyannote: Python 3.12 + Pyannote + torch 2.5.1 (for speaker diarization)
  *
  * This service provides:
@@ -528,7 +528,7 @@ class DualPythonEnvironmentService extends EventEmitter {
       '',
       'This setup creates two isolated virtual environments to avoid torch version conflicts.',
       '',
-      '1. Create WhisperX environment (torch 2.8):',
+      '1. Create WhisperX environment (torch 2.5.0):',
       `   cd "${pythonDir}"`,
       `   python3 -m venv ${WHISPERX_VENV_NAME}`,
       `   source ${WHISPERX_VENV_NAME}/bin/activate`,

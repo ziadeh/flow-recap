@@ -690,7 +690,7 @@ export function PythonEnvironmentDiagnostics({
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-2">
-                      Separate environments avoid torch version conflicts between WhisperX (2.8) and Pyannote (2.5.1)
+                      Separate environments avoid torch version conflicts between WhisperX (2.5.0) and Pyannote (2.5.1)
                     </p>
                   </div>
                 )}

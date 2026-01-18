@@ -1398,17 +1398,16 @@ class PythonEnvironmentValidatorService extends EventEmitter {
         }
 
         // Validate torch versions - be flexible about compatible versions
-        // Accept torch 2.7+ for whisperx (2.7, 2.8 work), 2.4+ for pyannote (2.4, 2.5, even 2.8 may work)
+        // Accept torch 2.5+ for whisperx and pyannote (2.5.x works for both)
         // The key insight: if torch is installed and pyannote.audio imports work, the version is compatible
         const whisperxHasTorch = whisperxTorch !== 'unknown' && whisperxTorch !== 'not installed'
         const pyannoteHasTorch = pyannoteTorch !== 'unknown' && pyannoteTorch !== 'not installed'
 
         // Preferred versions for optimal compatibility
-        const whisperxIdeal = whisperxTorch.startsWith('2.8') || whisperxTorch.startsWith('2.7')
+        const whisperxIdeal = whisperxTorch.startsWith('2.5')
         const pyannoteIdeal = pyannoteTorch.startsWith('2.5') || pyannoteTorch.startsWith('2.4')
 
-        // Extended compatibility: pyannote.audio 3.3.2+ may work with torch 2.8
-        // Check if version is >= 2.4 (works with pyannote)
+        // Extended compatibility: check if version is >= 2.4 (works with pyannote)
         const pyannoteMajor = parseInt(pyannoteTorch.split('.')[0] || '0')
         const pyannoteMinor = parseInt(pyannoteTorch.split('.')[1] || '0')
         const pyannoteCompatible = pyannoteHasTorch && pyannoteMajor === 2 && pyannoteMinor >= 4
@@ -1428,7 +1427,7 @@ class PythonEnvironmentValidatorService extends EventEmitter {
           check.remediation = [
             'If diarization works, you can ignore this warning.',
             'For optimal compatibility:',
-            '  WhisperX environment: pip install torch==2.8.0',
+            '  WhisperX environment: pip install torch==2.5.0',
             '  Pyannote environment: pip install torch==2.5.1',
           ]
         } else {
@@ -1436,7 +1435,7 @@ class PythonEnvironmentValidatorService extends EventEmitter {
           check.message = `Missing torch in one or both environments: WhisperX (${whisperxTorch}), Pyannote (${pyannoteTorch})`
           check.remediation = [
             'Install torch in the affected environment(s):',
-            '  WhisperX: pip install torch==2.8.0',
+            '  WhisperX: pip install torch==2.5.0',
             '  Pyannote: pip install torch==2.5.1',
           ]
         }
@@ -1446,7 +1445,7 @@ class PythonEnvironmentValidatorService extends EventEmitter {
         check.message = 'Using single Python environment - potential torch version conflicts may occur'
         check.remediation = [
           'Consider creating separate environments to avoid torch conflicts:',
-          '  1. Create venv-whisperx with torch 2.8 for transcription',
+          '  1. Create venv-whisperx with torch 2.5.0 for transcription',
           '  2. Create venv-pyannote with torch 2.5.1 for diarization',
           'See requirements-whisperx.txt and requirements-pyannote.txt for details',
         ]

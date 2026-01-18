@@ -91,7 +91,7 @@ class RequirementsValidator:
     # Known conflicting packages and their constraints
     KNOWN_CONFLICTS = {
         ("torch", "whisperx"): {
-            "description": "WhisperX requires torch 2.8.0, Pyannote requires torch 2.5.1",
+            "description": "WhisperX requires torch 2.5.0, Pyannote requires torch 2.5.1",
             "resolution": "Use separate virtual environments (venv-whisperx, venv-pyannote)",
         },
         ("numpy", "whisperx"): {
@@ -103,8 +103,8 @@ class RequirementsValidator:
     # Expected versions for critical packages
     EXPECTED_VERSIONS = {
         "requirements-whisperx.txt": {
-            "torch": "2.8.0",
-            "torchaudio": "2.8.0",
+            "torch": "2.5.0",
+            "torchaudio": "2.5.0",
         },
         "requirements-pyannote.txt": {
             "torch": "2.5.1",

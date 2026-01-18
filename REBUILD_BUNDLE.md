@@ -102,7 +102,7 @@ npm run bundle:python
 ./resources/python-bundle/transcription_bundle check
 
 # Should see:
-# ✓ PyTorch 2.8.0
+# ✓ PyTorch 2.5.0
 # ✓ WhisperX
 # ✓ faster-whisper
 # ✓ pyannote.audio
@@ -236,7 +236,7 @@ df -h .
 - Site-packages with all ML dependencies
 
 ### ML Libraries (Total: ~6 GB)
-- PyTorch 2.8.0 (~2 GB)
+- PyTorch 2.5.0 (~2 GB)
 - TorchAudio (~200 MB)
 - WhisperX (~50 MB)
 - faster-whisper + CTranslate2 (~100 MB)

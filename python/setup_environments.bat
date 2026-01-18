@@ -493,7 +493,7 @@ if "%JSON_OUTPUT%"=="true" (
     echo ========================================
     echo.
     echo Environments created:
-    echo   - venv-whisperx: For transcription (WhisperX + torch 2.8)
+    echo   - venv-whisperx: For transcription (WhisperX + torch 2.5.0)
     echo   - venv-pyannote: For diarization (Pyannote + torch 2.5.1)
     echo.
     echo Next steps:

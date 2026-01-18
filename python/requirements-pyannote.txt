@@ -7,8 +7,8 @@
 # Python Version: 3.10+ (3.12 recommended)
 #
 # IMPORTANT: This environment uses torch 2.5.1 which is REQUIRED for Pyannote
-# Do NOT mix with WhisperX which requires torch 2.8
-# Using torch 2.8 causes crashes with pyannote models due to weights_only loading.
+# Do NOT mix with WhisperX which requires torch 2.5.0
+# Using different PyTorch versions helps avoid potential conflicts between the two environments.
 #
 # Conflict Resolution:
 #   - torch version differs from whisperx requirements

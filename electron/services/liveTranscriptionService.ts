@@ -337,7 +337,7 @@ function getPythonScriptsDir(): string {
 /**
  * Find the Python executable path for transcription (WhisperX)
  * Uses the dual environment system when available:
- * - venv-whisperx: Python 3.12 + WhisperX + torch 2.8 (for transcription)
+ * - venv-whisperx: Python 3.12 + WhisperX + torch 2.5.0 (for transcription)
  * Supports multiple virtual environment directories as fallback
  */
 function findPythonPath(): string {
@@ -409,7 +409,7 @@ function findPythonPath(): string {
   }
 
   // Fallback: List of virtual environment directories to check, in order of preference
-  // venv-whisperx is preferred for WhisperX with torch 2.8
+  // venv-whisperx is preferred for WhisperX with torch 2.5.0
   // venv-3.12 and venv are legacy fallbacks
   const venvDirs = ['venv-whisperx', 'venv-3.12', 'venv']
 

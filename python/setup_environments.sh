@@ -616,7 +616,7 @@ print_summary() {
         echo -e "${BLUE}========================================${NC}"
         echo ""
         echo -e "${CYAN}Environments created:${NC}"
-        echo "  • venv-whisperx: For transcription (WhisperX + torch 2.8)"
+        echo "  • venv-whisperx: For transcription (WhisperX + torch 2.5.0)"
         echo "  • venv-pyannote: For diarization (Pyannote + torch 2.5.1)"
         echo ""
         echo -e "${CYAN}Next steps:${NC}"

@@ -149,7 +149,7 @@ jobs:
           python -c "
           import torch
           print(f'PyTorch version: {torch.__version__}')
-          assert torch.__version__.startswith('2.8'), f'Expected torch 2.8.x, got {torch.__version__}'
+          assert torch.__version__.startswith('2.5'), f'Expected torch 2.5.x, got {torch.__version__}'
           print('✓ Torch version check passed')
           "
 

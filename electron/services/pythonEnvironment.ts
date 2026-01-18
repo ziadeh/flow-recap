@@ -13,7 +13,7 @@
  *
  * 2. Dual Virtual Environment (Development - RECOMMENDED)
  *    - Separate venvs for WhisperX and Pyannote to avoid torch version conflicts
- *    - venv-whisperx: Python 3.12 + WhisperX + torch 2.8 (for transcription)
+ *    - venv-whisperx: Python 3.12 + WhisperX + torch 2.5.0 (for transcription)
  *    - venv-pyannote: Python 3.12 + Pyannote + torch 2.5.1 (for diarization)
  *    - Automatic environment switching based on operation type
  *
