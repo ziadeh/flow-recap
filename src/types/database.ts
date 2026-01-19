@@ -92,6 +92,9 @@ export interface Transcript {
   confidence: number     // 0.0 to 1.0
   is_final: boolean
   created_at: string
+  is_compressed?: boolean  // Whether content is gzip compressed
+  content_uncompressed?: string  // Original uncompressed text for FTS5 and caching
+  filler_map?: string  // JSON map of removed filler words
 }
 
 export interface CreateTranscriptInput {

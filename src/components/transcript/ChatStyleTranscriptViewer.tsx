@@ -7,14 +7,31 @@
  * - Color-coded speaker names
  * - Timestamps on the right side
  * - Full-text search with highlighting
+ *
+ * Performance Optimization:
+ * - Small transcripts (<30 groups): Standard rendering
+ * - Medium transcripts (30-200 groups): react-window virtualization
+ * - Large transcripts (200+ groups): Infinite scroll pagination with chunks of 50-100 lines
+ *
+ * The infinite scroll pagination loads additional segments as user scrolls,
+ * keeping DOM size manageable and enabling instant initial render for
+ * hour-long meetings.
  */
 
-import { useRef, useEffect, useMemo } from 'react'
+import { useRef, useEffect, useMemo, useCallback } from 'react'
 import { MessageSquare } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { formatDurationMs, formatTranscriptWithSentenceBreaks } from '../../lib/formatters'
 import { SpeakerTimeline, type DiarizationError } from './SpeakerTimeline'
 import { HighlightedText } from './TranscriptSearch'
+import {
+  VirtualizedTranscriptList,
+  type VirtualizedTranscriptListRef,
+} from './VirtualizedTranscriptList'
+import {
+  InfiniteScrollTranscriptList,
+  type InfiniteScrollTranscriptListRef,
+} from './InfiniteScrollTranscriptList'
 import {
   getSpeakerColor,
   getSpeakerInitials,
@@ -24,6 +41,22 @@ import {
   type TranscriptGroup,
 } from './transcript-utils'
 import type { Transcript, Speaker } from '../../types/database'
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/** Minimum number of message groups before virtualization kicks in */
+const VIRTUALIZATION_THRESHOLD = 30
+
+/** Threshold for using infinite scroll instead of virtualization (for very large transcripts) */
+const INFINITE_SCROLL_THRESHOLD = 200
+
+/** Default height for the virtualized list container */
+const DEFAULT_LIST_HEIGHT = 600
+
+/** Default chunk size for infinite scroll pagination (50-100 lines per chunk) */
+const DEFAULT_CHUNK_SIZE = 75
 
 // ============================================================================
 // Types
@@ -60,6 +93,14 @@ export interface ChatStyleTranscriptViewerProps {
   currentSearchMatchId?: string
   /** Additional class names */
   className?: string
+  /** Height of the virtualized list container (default: 600) */
+  listHeight?: number
+  /** Whether to use virtualization (default: auto based on item count) */
+  enableVirtualization?: boolean
+  /** Whether to use infinite scroll pagination for large transcripts (default: auto based on item count) */
+  enableInfiniteScroll?: boolean
+  /** Chunk size for infinite scroll pagination (default: 75) */
+  infiniteScrollChunkSize?: number
 }
 
 interface ChatMessageProps {
@@ -229,9 +270,15 @@ export function ChatStyleTranscriptViewer({
   searchQuery,
   searchMatchIds,
   currentSearchMatchId,
-  className
+  className,
+  listHeight = DEFAULT_LIST_HEIGHT,
+  enableVirtualization,
+  enableInfiniteScroll,
+  infiniteScrollChunkSize = DEFAULT_CHUNK_SIZE,
 }: ChatStyleTranscriptViewerProps) {
   const activeEntryRef = useRef<HTMLDivElement>(null)
+  const virtualListRef = useRef<VirtualizedTranscriptListRef>(null)
+  const infiniteScrollListRef = useRef<InfiniteScrollTranscriptListRef>(null)
   const currentTimeMs = currentAudioTime * 1000
 
   // Build speaker color index
@@ -274,28 +321,59 @@ export function ChatStyleTranscriptViewer({
     )
   }, [messageGroups, currentSearchMatchId])
 
+  // Determine if infinite scroll should be used (for very large transcripts)
+  const shouldUseInfiniteScroll = useMemo(() => {
+    if (enableInfiniteScroll !== undefined) return enableInfiniteScroll
+    return messageGroups.length >= INFINITE_SCROLL_THRESHOLD
+  }, [enableInfiniteScroll, messageGroups.length])
+
+  // Determine if virtualization should be used (for medium-sized transcripts)
+  const shouldVirtualize = useMemo(() => {
+    if (shouldUseInfiniteScroll) return false // Infinite scroll takes precedence
+    if (enableVirtualization !== undefined) return enableVirtualization
+    return messageGroups.length >= VIRTUALIZATION_THRESHOLD
+  }, [enableVirtualization, messageGroups.length, shouldUseInfiniteScroll])
+
   // Auto-scroll to active entry when it changes (during playback, not search)
   useEffect(() => {
-    if (autoScroll && activeEntryRef.current && activeGroupIndex >= 0 && !currentSearchMatchId) {
-      activeEntryRef.current.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center'
-      })
-    }
-  }, [activeGroupIndex, autoScroll, currentSearchMatchId])
-
-  // Scroll to current search match when it changes
-  useEffect(() => {
-    if (currentSearchMatchId) {
-      const matchElement = document.querySelector(`[data-entry-id="${currentSearchMatchId}"]`)
-      if (matchElement) {
-        matchElement.scrollIntoView({
+    if (autoScroll && activeGroupIndex >= 0 && !currentSearchMatchId) {
+      if (shouldUseInfiniteScroll) {
+        // Use infinite scroll list scrolling
+        infiniteScrollListRef.current?.scrollToIndex(activeGroupIndex, 'smooth')
+      } else if (shouldVirtualize) {
+        // Use virtualized list scrolling
+        virtualListRef.current?.scrollToItem(activeGroupIndex, 'center')
+      } else if (activeEntryRef.current) {
+        // Use DOM scrolling for non-virtualized list
+        activeEntryRef.current.scrollIntoView({
           behavior: 'smooth',
           block: 'center'
         })
       }
     }
-  }, [currentSearchMatchId])
+  }, [activeGroupIndex, autoScroll, currentSearchMatchId, shouldVirtualize, shouldUseInfiniteScroll])
+
+  // Scroll to current search match when it changes
+  useEffect(() => {
+    if (currentSearchMatchId) {
+      if (shouldUseInfiniteScroll && currentSearchMatchGroupIndex >= 0) {
+        // Use infinite scroll list scrolling
+        infiniteScrollListRef.current?.scrollToIndex(currentSearchMatchGroupIndex, 'smooth')
+      } else if (shouldVirtualize && currentSearchMatchGroupIndex >= 0) {
+        // Use virtualized list scrolling
+        virtualListRef.current?.scrollToItem(currentSearchMatchGroupIndex, 'center')
+      } else {
+        // Use DOM scrolling for non-virtualized list
+        const matchElement = document.querySelector(`[data-entry-id="${currentSearchMatchId}"]`)
+        if (matchElement) {
+          matchElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center'
+          })
+        }
+      }
+    }
+  }, [currentSearchMatchId, currentSearchMatchGroupIndex, shouldVirtualize, shouldUseInfiniteScroll])
 
   // Handle seek from timeline
   const handleTimelineSeek = (timeMs: number) => {
@@ -305,11 +383,59 @@ export function ChatStyleTranscriptViewer({
   }
 
   // Handle seek from message timestamp
-  const handleTimestampClick = (timeMs: number) => {
+  const handleTimestampClick = useCallback((timeMs: number) => {
     if (onSeekAudio) {
       onSeekAudio(timeMs / 1000)
     }
-  }
+  }, [onSeekAudio])
+
+  // Render a single chat message (used by virtualized list)
+  const renderChatMessage = useCallback(
+    (group: TranscriptGroup, index: number, _isScrolling: boolean) => {
+      const isActive = index === activeGroupIndex
+      // Check if any entry in this group matches the search
+      const hasSearchMatch = group.entries.some(entry => searchMatchIdsSet.has(entry.id))
+      // Check if this group contains the current search match
+      const isCurrentSearchMatch = index === currentSearchMatchGroupIndex
+
+      return (
+        <ChatMessage
+          key={`${group.speakerId || 'unknown'}-${group.entries[0].id}`}
+          group={group}
+          isActive={isActive}
+          onTimestampClick={handleTimestampClick}
+          activeRef={!shouldVirtualize && (isActive || isCurrentSearchMatch) ? activeEntryRef : undefined}
+          searchQuery={searchQuery}
+          hasSearchMatch={hasSearchMatch}
+          isCurrentSearchMatch={isCurrentSearchMatch}
+        />
+      )
+    },
+    [activeGroupIndex, searchMatchIdsSet, currentSearchMatchGroupIndex, handleTimestampClick, shouldVirtualize, searchQuery]
+  )
+
+  // Render a single chat message for infinite scroll (uses actualIndex for correct highlighting)
+  const renderInfiniteScrollGroup = useCallback(
+    (group: TranscriptGroup, _visibleIndex: number, actualIndex: number) => {
+      const isActive = actualIndex === activeGroupIndex
+      // Check if any entry in this group matches the search
+      const hasSearchMatch = group.entries.some(entry => searchMatchIdsSet.has(entry.id))
+      // Check if this group contains the current search match
+      const isCurrentSearchMatch = actualIndex === currentSearchMatchGroupIndex
+
+      return (
+        <ChatMessage
+          group={group}
+          isActive={isActive}
+          onTimestampClick={handleTimestampClick}
+          searchQuery={searchQuery}
+          hasSearchMatch={hasSearchMatch}
+          isCurrentSearchMatch={isCurrentSearchMatch}
+        />
+      )
+    },
+    [activeGroupIndex, searchMatchIdsSet, currentSearchMatchGroupIndex, handleTimestampClick, searchQuery]
+  )
 
   // Empty state
   if (transcripts.length === 0) {
@@ -340,28 +466,57 @@ export function ChatStyleTranscriptViewer({
       )}
 
       {/* Chat Messages */}
-      <div className="space-y-1">
-        {messageGroups.map((group, index) => {
-          const isActive = index === activeGroupIndex
-          // Check if any entry in this group matches the search
-          const hasSearchMatch = group.entries.some(entry => searchMatchIdsSet.has(entry.id))
-          // Check if this group contains the current search match
-          const isCurrentSearchMatch = index === currentSearchMatchGroupIndex
+      {shouldUseInfiniteScroll ? (
+        /* Infinite scroll pagination for very large transcripts */
+        <InfiniteScrollTranscriptList
+          ref={infiniteScrollListRef}
+          groups={messageGroups}
+          renderGroup={renderInfiniteScrollGroup}
+          chunkSize={infiniteScrollChunkSize}
+          maxChunks={3}
+          height={listHeight}
+          scrollToIndex={currentSearchMatchGroupIndex >= 0 ? currentSearchMatchGroupIndex : activeGroupIndex}
+          showLoadingIndicators={true}
+          testId="chat-transcript-infinite-scroll"
+        />
+      ) : shouldVirtualize ? (
+        /* Virtualized rendering for long transcripts */
+        <VirtualizedTranscriptList
+          ref={virtualListRef}
+          items={messageGroups}
+          height={listHeight}
+          renderItem={renderChatMessage}
+          estimatedItemHeight={100}
+          overscanCount={3}
+          virtualizationThreshold={VIRTUALIZATION_THRESHOLD}
+          getItemKey={(group, _index) => `${group.speakerId || 'unknown'}-${group.entries[0].id}`}
+          className="space-y-1"
+        />
+      ) : (
+        /* Standard rendering for short transcripts */
+        <div className="space-y-1" data-virtualized="false">
+          {messageGroups.map((group, index) => {
+            const isActive = index === activeGroupIndex
+            // Check if any entry in this group matches the search
+            const hasSearchMatch = group.entries.some(entry => searchMatchIdsSet.has(entry.id))
+            // Check if this group contains the current search match
+            const isCurrentSearchMatch = index === currentSearchMatchGroupIndex
 
-          return (
-            <ChatMessage
-              key={`${group.speakerId || 'unknown'}-${group.entries[0].id}`}
-              group={group}
-              isActive={isActive}
-              onTimestampClick={handleTimestampClick}
-              activeRef={(isActive || isCurrentSearchMatch) ? activeEntryRef : undefined}
-              searchQuery={searchQuery}
-              hasSearchMatch={hasSearchMatch}
-              isCurrentSearchMatch={isCurrentSearchMatch}
-            />
-          )
-        })}
-      </div>
+            return (
+              <ChatMessage
+                key={`${group.speakerId || 'unknown'}-${group.entries[0].id}`}
+                group={group}
+                isActive={isActive}
+                onTimestampClick={handleTimestampClick}
+                activeRef={(isActive || isCurrentSearchMatch) ? activeEntryRef : undefined}
+                searchQuery={searchQuery}
+                hasSearchMatch={hasSearchMatch}
+                isCurrentSearchMatch={isCurrentSearchMatch}
+              />
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

@@ -445,3 +445,33 @@ export const useInsightsElapsedTime = () =>
 
 export const useInsightsExporting = () =>
   useRealtimeInsightsStore((state) => state.isExporting)
+
+/**
+ * Composite hook for all action functions
+ * Use this to avoid multiple store subscriptions for different actions
+ * Consolidates all setter methods into a single hook
+ */
+export const useInsightsPanelActions = () =>
+  useRealtimeInsightsStore(useShallow((state) => ({
+    initializePanel: state.initializePanel,
+    closePanel: state.closePanel,
+    setVisible: state.setVisible,
+    setEnabled: state.setEnabled,
+    toggleSection: state.toggleSection,
+    expandSection: state.expandSection,
+    collapseSection: state.collapseSection,
+    expandAllSections: state.expandAllSections,
+    collapseAllSections: state.collapseAllSections,
+    updateMetrics: state.updateMetrics,
+    updateElapsedTime: state.updateElapsedTime,
+    updateActiveSpeaker: state.updateActiveSpeaker,
+    updateSpeakerParticipation: state.updateSpeakerParticipation,
+    addLowConfidenceSegment: state.addLowConfidenceSegment,
+    updateNoteCounts: state.updateNoteCounts,
+    addTopicTransition: state.addTopicTransition,
+    setProcessing: state.setProcessing,
+    startExport: state.startExport,
+    completeExport: state.completeExport,
+    getExportSnapshot: state.getExportSnapshot,
+    reset: state.reset,
+  })))

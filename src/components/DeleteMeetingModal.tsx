@@ -253,9 +253,10 @@ export function DeleteMeetingModal({
         }
       }
 
-      // Call onDeleted callback after successful deletion
+      // Call onDeleted callback immediately after successful deletion
+      // The UI should update right away for better UX
       if (onDeleted) {
-        setTimeout(onDeleted, 1500) // Give time to show success message
+        onDeleted()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Deletion failed')

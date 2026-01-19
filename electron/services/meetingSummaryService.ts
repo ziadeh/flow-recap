@@ -16,7 +16,9 @@ import { llmRoutingService } from './llm/llmRoutingService'
 import type { ChatMessage } from './lm-studio-client'
 import { transcriptService } from './transcriptService'
 import { meetingNoteService } from './meetingNoteService'
+import { redisCacheService } from './redisCacheService'
 import type { MeetingNote, NoteType, Transcript } from '../../src/types/database'
+import { createHash } from 'crypto'
 
 // ============================================================================
 // Types
@@ -201,6 +203,20 @@ function formatTranscriptsForLLM(transcripts: Transcript[]): string {
 }
 
 /**
+ * Generate a content hash for cache key generation
+ * Creates a deterministic hash of the transcript content
+ */
+function generateTranscriptHash(transcripts: Transcript[]): string {
+  if (transcripts.length === 0) {
+    return 'empty'
+  }
+
+  // Create a stable representation of the transcript content
+  const contentArray = transcripts.map(t => `${t.speaker_id}:${t.content}:${t.start_time_ms}`).join('|')
+  return createHash('sha256').update(contentArray).digest('hex').slice(0, 16)
+}
+
+/**
  * Parse and validate LLM response as StructuredSummary
  */
 function parseStructuredSummary(content: string): { valid: boolean; data?: StructuredSummary; error?: string } {
@@ -300,20 +316,6 @@ class MeetingSummaryService {
     const startTime = Date.now()
     const mergedConfig = { ...this.config, ...config }
 
-    // Check LLM availability
-    const availability = await this.checkAvailability()
-    if (!availability.available) {
-      return {
-        success: false,
-        error: availability.error,
-        metadata: {
-          processingTimeMs: Date.now() - startTime,
-          transcriptSegmentCount: 0,
-          transcriptCharacterCount: 0
-        }
-      }
-    }
-
     // Fetch transcripts for the meeting
     const transcripts = transcriptService.getByMeetingId(meetingId)
 
@@ -333,6 +335,48 @@ class MeetingSummaryService {
     const limitedTranscripts = mergedConfig.maxTranscriptSegments
       ? transcripts.slice(0, mergedConfig.maxTranscriptSegments)
       : transcripts
+
+    // Generate cache key based on transcript content
+    const transcriptHash = generateTranscriptHash(limitedTranscripts)
+    const cacheKey = `llm:summary:${meetingId}:${transcriptHash}`
+
+    // Check if summary is cached
+    const cachedSummary = await redisCacheService.get<StructuredSummary>(cacheKey)
+    if (cachedSummary) {
+      console.log(`[MeetingSummary] ✅ Cache HIT for meeting ${meetingId} (transcript hash: ${transcriptHash})`)
+      console.log(`[MeetingSummary] Creating meeting notes from cached summary...`)
+
+      // Create notes from cached summary
+      const createdNotes = await this.createNotesFromSummary(meetingId, cachedSummary, mergedConfig)
+
+      return {
+        success: true,
+        summary: cachedSummary,
+        createdNotes,
+        metadata: {
+          processingTimeMs: Date.now() - startTime,
+          transcriptSegmentCount: limitedTranscripts.length,
+          transcriptCharacterCount: 0,
+          source: 'cache' as any
+        }
+      }
+    }
+
+    // Cache miss - need to check LLM availability and generate summary
+    const availability = await this.checkAvailability()
+    if (!availability.available) {
+      return {
+        success: false,
+        error: availability.error,
+        metadata: {
+          processingTimeMs: Date.now() - startTime,
+          transcriptSegmentCount: limitedTranscripts.length,
+          transcriptCharacterCount: 0
+        }
+      }
+    }
+
+    console.log(`[MeetingSummary] ⚠️ Cache MISS for meeting ${meetingId} (transcript hash: ${transcriptHash})`)
 
     // Format transcripts for LLM
     const formattedTranscript = formatTranscriptsForLLM(limitedTranscripts)
@@ -399,6 +443,11 @@ class MeetingSummaryService {
       }
     }
 
+    // Cache the parsed summary for future use
+    const ttl = redisCacheService.getTTL('llmResponse')
+    await redisCacheService.set(cacheKey, parsed.data, ttl)
+    console.log(`[MeetingSummary] 💾 Cached summary for meeting ${meetingId} (TTL: ${ttl}s)`)
+
     // Create meeting notes from the summary
     const createdNotes = await this.createNotesFromSummary(meetingId, parsed.data, mergedConfig)
 
@@ -410,7 +459,8 @@ class MeetingSummaryService {
         processingTimeMs: Date.now() - startTime,
         transcriptSegmentCount: limitedTranscripts.length,
         transcriptCharacterCount,
-        llmResponseTimeMs
+        llmResponseTimeMs,
+        cached: false as any
       }
     }
   }

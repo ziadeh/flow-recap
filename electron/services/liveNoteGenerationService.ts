@@ -22,6 +22,7 @@ import { randomUUID } from 'crypto'
 import { llmRoutingService } from './llm/llmRoutingService'
 import { meetingNoteService } from './meetingNoteService'
 import { taskService } from './taskService'
+import { ipcEventBatcher } from './ipcEventBatcher'
 import type { ChatMessage } from './lm-studio-client'
 import type { NoteType, TaskPriority } from '../../src/types/database'
 
@@ -914,6 +915,9 @@ class LiveNoteGenerationService {
   // --------------------------------------------------------------------------
 
   private emitNotes(notes: LiveNoteItem[]): void {
+    // BATCHED: Notes are buffered for consolidated delivery every 500ms
+    ipcEventBatcher.bufferLiveNotes(notes)
+    // Also send immediately for backward compatibility
     const windows = BrowserWindow.getAllWindows()
     for (const win of windows) {
       win.webContents.send('liveNotes:notes', notes)
@@ -921,6 +925,9 @@ class LiveNoteGenerationService {
   }
 
   private emitStatusUpdate(status: string): void {
+    // BATCHED: Status updates are buffered for consolidated delivery every 500ms
+    ipcEventBatcher.bufferLiveNotesStatus({ status, timestamp: Date.now() })
+    // Also send immediately for backward compatibility
     const windows = BrowserWindow.getAllWindows()
     for (const win of windows) {
       win.webContents.send('liveNotes:status', { status, timestamp: Date.now() })
@@ -928,6 +935,15 @@ class LiveNoteGenerationService {
   }
 
   private emitBatchStateUpdate(state: Record<string, unknown>): void {
+    // BATCHED: Batch state updates are buffered for consolidated delivery every 500ms
+    ipcEventBatcher.bufferLiveNotesBatchState({
+      pendingSegments: (state.pendingSegments as number) || 0,
+      processedSegmentIds: (state.processedSegmentIds as string[]) || [],
+      batchesProcessed: (state.batchesProcessed as number) || 0,
+      totalNotesGenerated: (state.totalNotesGenerated as number) || 0,
+      timestamp: Date.now()
+    })
+    // Also send immediately for backward compatibility
     const windows = BrowserWindow.getAllWindows()
     for (const win of windows) {
       win.webContents.send('liveNotes:batchState', { ...state, timestamp: Date.now() })
@@ -940,6 +956,14 @@ class LiveNoteGenerationService {
     timestamp: number
     recoverable: boolean
   }): void {
+    // BATCHED: Errors are buffered for consolidated delivery every 500ms
+    ipcEventBatcher.bufferLiveNotesError({
+      error: error.message,
+      code: error.code,
+      details: error.recoverable ? 'recoverable' : 'non-recoverable',
+      timestamp: error.timestamp
+    })
+    // Also send immediately for backward compatibility
     const windows = BrowserWindow.getAllWindows()
     for (const win of windows) {
       win.webContents.send('liveNotes:error', error)

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense, lazy } from 'react'
 import { HashRouter, Routes, Route } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
 import { SetupWizard } from '@/components/SetupWizard'
@@ -6,8 +6,21 @@ import { MigrationWizard } from '@/components/MigrationWizard'
 import { LiveTranscriptionProvider } from '@/components/LiveTranscriptionProvider'
 import { EnvironmentWarningBanner } from '@/components/EnvironmentWarningBanner'
 import { StartupValidationScreen } from '@/components/StartupValidationScreen'
-import { Dashboard, Meetings, Settings, Tasks } from '@/pages'
-import MeetingDetail from '@/pages/MeetingDetail'
+import {
+  DashboardFallback,
+  MeetingsFallback,
+  MeetingDetailFallback,
+  TasksFallback,
+  SettingsFallback
+} from '@/components/PageLoadingFallback'
+
+// Lazy load route components for code splitting
+// Each route is loaded only when accessed, reducing initial bundle size
+const Dashboard = lazy(() => import('@/pages/Dashboard'))
+const Meetings = lazy(() => import('@/pages/Meetings'))
+const MeetingDetail = lazy(() => import('@/pages/MeetingDetail'))
+const Tasks = lazy(() => import('@/pages/Tasks'))
+const Settings = lazy(() => import('@/pages/Settings'))
 
 function App() {
   const [showWizard, setShowWizard] = useState<boolean | null>(null)
@@ -113,11 +126,46 @@ function App() {
           {/* Environment warning banner - shows when Python environments are degraded */}
           <EnvironmentWarningBanner />
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/meetings" element={<Meetings />} />
-            <Route path="/meeting/:id" element={<MeetingDetail />} />
-            <Route path="/tasks" element={<Tasks />} />
-            <Route path="/settings" element={<Settings />} />
+            <Route
+              path="/"
+              element={
+                <Suspense fallback={<DashboardFallback />}>
+                  <Dashboard />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/meetings"
+              element={
+                <Suspense fallback={<MeetingsFallback />}>
+                  <Meetings />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/meeting/:id"
+              element={
+                <Suspense fallback={<MeetingDetailFallback />}>
+                  <MeetingDetail />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/tasks"
+              element={
+                <Suspense fallback={<TasksFallback />}>
+                  <Tasks />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <Suspense fallback={<SettingsFallback />}>
+                  <Settings />
+                </Suspense>
+              }
+            />
           </Routes>
         </Layout>
       </HashRouter>

@@ -6,6 +6,7 @@
  */
 
 import { create } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
 import type { Transcript } from '../types/database'
 
 // Status of the live transcription service
@@ -691,3 +692,35 @@ export const useIsStreamingDiarizationActive = () =>
     state.streamingDiarization.status === 'active' ||
     state.streamingDiarization.status === 'ready'
   )
+
+/**
+ * Composite hook for all action functions
+ * Use this to avoid multiple store subscriptions for different actions
+ * Consolidates all setter methods into a single hook
+ */
+export const useLiveTranscriptActions = () =>
+  useLiveTranscriptStore(useShallow((state) => ({
+    startSession: state.startSession,
+    stopSession: state.stopSession,
+    pauseSession: state.pauseSession,
+    resumeSession: state.resumeSession,
+    addSegment: state.addSegment,
+    updateSegment: state.updateSegment,
+    addSegments: state.addSegments,
+    clearSegments: state.clearSegments,
+    setError: state.setError,
+    setStatus: state.setStatus,
+    setProgress: state.setProgress,
+    setEnabled: state.setEnabled,
+    setDiarizationStatus: state.setDiarizationStatus,
+    setStreamingDiarizationState: state.setStreamingDiarizationState,
+    addSpeakerSegment: state.addSpeakerSegment,
+    updateSpeakerSegment: state.updateSpeakerSegment,
+    addSpeakerChange: state.addSpeakerChange,
+    applyRetroactiveCorrection: state.applyRetroactiveCorrection,
+    clearStreamingDiarization: state.clearStreamingDiarization,
+    getSpeakerForTimeRange: state.getSpeakerForTimeRange,
+    reset: state.reset,
+    getTranscriptsForSave: state.getTranscriptsForSave,
+    saveToDatabase: state.saveToDatabase,
+  })))

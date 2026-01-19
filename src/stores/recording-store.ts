@@ -5,6 +5,7 @@
  */
 
 import { create } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
 
 // Recording types (mirrored from electron/preload.ts)
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'stopping'
@@ -83,3 +84,52 @@ export const useRecordingStore = create<RecordingStore>()((set) => ({
   reset: () =>
     set(initialState)
 }))
+
+/**
+ * Granular selectors for recording store
+ * These selectors prevent unnecessary re-renders by allowing components
+ * to subscribe only to the state properties they need
+ */
+
+/** Select only the recording status */
+export const useRecordingStatus = () =>
+  useRecordingStore((state) => state.status)
+
+/** Select only the audio level - high frequency updates (10/sec) */
+export const useAudioLevel = () =>
+  useRecordingStore((state) => state.audioLevel)
+
+/** Select only the recording duration */
+export const useRecordingDuration = () =>
+  useRecordingStore((state) => state.duration)
+
+/** Select only the recording start time */
+export const useRecordingStartTime = () =>
+  useRecordingStore((state) => state.startTime)
+
+/** Select only the audio health status */
+export const useAudioHealth = () =>
+  useRecordingStore(useShallow((state) => state.audioHealth))
+
+/** Select recording metadata (meeting info) with shallow equality */
+export const useRecordingMetadata = () =>
+  useRecordingStore(useShallow((state) => ({
+    meetingId: state.meetingId,
+    audioFilePath: state.audioFilePath,
+    deviceUsed: state.deviceUsed,
+    deviceWarning: state.deviceWarning
+  })))
+
+/** Select all recording action functions */
+export const useRecordingActions = () =>
+  useRecordingStore(useShallow((state) => ({
+    setStatus: state.setStatus,
+    setMeetingId: state.setMeetingId,
+    setStartTime: state.setStartTime,
+    setDuration: state.setDuration,
+    setAudioFilePath: state.setAudioFilePath,
+    setAudioLevel: state.setAudioLevel,
+    setAudioHealth: state.setAudioHealth,
+    updateState: state.updateState,
+    reset: state.reset
+  })))

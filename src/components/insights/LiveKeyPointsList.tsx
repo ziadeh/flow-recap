@@ -11,7 +11,7 @@
  * - Empty state messaging
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo, memo } from 'react'
 import {
   Lightbulb,
   User,
@@ -78,7 +78,11 @@ interface KeyPointItemProps {
   onClick?: (item: LiveNoteItem) => void
 }
 
-function KeyPointItem({ item, isNew, showConfidence, onClick }: KeyPointItemProps) {
+/**
+ * Key point item component
+ * Memoized to prevent re-renders when item hasn't changed
+ */
+const KeyPointItem = memo(function KeyPointItem({ item, isNew, showConfidence, onClick }: KeyPointItemProps) {
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString([], {
       hour: '2-digit',
@@ -174,13 +178,18 @@ function KeyPointItem({ item, isNew, showConfidence, onClick }: KeyPointItemProp
       </div>
     </div>
   )
-}
+})
 
 // ============================================================================
 // Main Component
 // ============================================================================
 
-export function LiveKeyPointsList({
+/**
+ * LiveKeyPointsList Component
+ * Displays key discussion points detected during live recording
+ * Memoized to prevent re-renders when props haven't changed
+ */
+export const LiveKeyPointsList = memo(function LiveKeyPointsList({
   keyPoints,
   isProcessing = false,
   showConfidence = true,
@@ -228,10 +237,12 @@ export function LiveKeyPointsList({
     }
   }, [keyPoints.length, enableAutoScroll])
 
-  // Calculate last update time
-  const lastUpdateTime = keyPoints.length > 0
-    ? Math.max(...keyPoints.map((item) => item.extractedAt))
-    : null
+  // Memoize last update time calculation
+  const lastUpdateTime = useMemo(() => {
+    return keyPoints.length > 0
+      ? Math.max(...keyPoints.map((item) => item.extractedAt))
+      : null
+  }, [keyPoints])
 
   const getLastUpdatedText = () => {
     if (!lastUpdateTime) return 'Never'
@@ -242,14 +253,15 @@ export function LiveKeyPointsList({
     return `${minutes}m ago`
   }
 
+  // Memoize grouped key points
   // Group by topic if available (future enhancement)
   // For now, just display in chronological order
-  const groupedKeyPoints = [
+  const groupedKeyPoints = useMemo(() => [
     {
       topic: null,
       points: keyPoints,
     },
-  ]
+  ], [keyPoints])
 
   return (
     <div className={cn('flex flex-col h-full', className)} data-testid="live-key-points-list">
@@ -314,6 +326,6 @@ export function LiveKeyPointsList({
       )}
     </div>
   )
-}
+})
 
 export default LiveKeyPointsList

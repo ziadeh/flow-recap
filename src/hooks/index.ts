@@ -21,3 +21,9 @@ export {
   type UseInsightsDataOptions,
   type UseInsightsDataReturn,
 } from './useInsightsData'
+export {
+  useAudioVisualizationWorker,
+  processAudioChunkSync,
+  type UseAudioVisualizationWorkerReturn,
+} from './useAudioVisualizationWorker'
+export { useSortWorker, sortTranscriptsSync, sortNotesSync, sortTasksSync, SORT_WORKER_THRESHOLD } from './useSortWorker'

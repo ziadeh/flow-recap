@@ -4,10 +4,14 @@
  * A visual audio waveform visualizer that responds to incoming audio levels.
  * Designed for use in the header during active recording sessions.
  * Includes simulation mode for when real audio data isn't available.
+ *
+ * PERFORMANCE: When audioData is provided, heavy processing (RMS calculation,
+ * waveform bar generation) is offloaded to a Web Worker to prevent UI blocking.
  */
 
 import { useMemo, useEffect, useState, useRef, useCallback } from 'react'
 import { cn } from '@/lib/utils'
+import { useAudioVisualizationWorker } from '@/hooks/useAudioVisualizationWorker'
 
 interface AudioWaveformProps {
   /** Audio level from 0-100 (optional - will simulate if not provided or 0) */
@@ -18,17 +22,45 @@ interface AudioWaveformProps {
   barCount?: number
   /** Whether animation is active */
   isAnimating?: boolean
+  /**
+   * Raw audio data for worker-based processing (optional)
+   * When provided, enables more accurate waveform visualization
+   * by processing actual audio samples in a Web Worker
+   */
+  audioData?: ArrayBuffer
+  /**
+   * Audio format configuration (required when audioData is provided)
+   */
+  audioFormat?: {
+    sampleRate: number
+    channels: number
+    bitDepth: number
+  }
+  /**
+   * Whether to use the Web Worker for processing (default: true)
+   * Can be disabled for simpler level-based animation
+   */
+  useWorker?: boolean
 }
 
 export function AudioWaveform({
   level = 0,
   className,
   barCount = 28,
-  isAnimating = true
+  isAnimating = true,
+  audioData,
+  audioFormat,
+  useWorker = true
 }: AudioWaveformProps) {
   const [barHeights, setBarHeights] = useState<number[]>(() => Array(barCount).fill(0.15))
+  const [workerProcessedBars, setWorkerProcessedBars] = useState<number[] | null>(null)
   const animationRef = useRef<number | null>(null)
   const lastUpdateRef = useRef<number>(0)
+  const lastAudioDataRef = useRef<ArrayBuffer | null>(null)
+
+  // Initialize the audio visualization worker
+  // isWorkerAvailable could be used for debugging/status display if needed
+  const { processAudioChunk } = useAudioVisualizationWorker()
 
   // Generate stable bar patterns that persist across renders
   const barPatterns = useMemo(() => {
@@ -50,6 +82,35 @@ export function AudioWaveform({
     return Math.max(10, Math.min(90, baseLevel + variation))
   }, [])
 
+  // Process raw audio data with Web Worker when available
+  useEffect(() => {
+    // Skip if worker processing is disabled or no audio data
+    if (!useWorker || !audioData || !audioFormat) {
+      setWorkerProcessedBars(null)
+      return
+    }
+
+    // Skip if same audio data (reference check)
+    if (audioData === lastAudioDataRef.current) {
+      return
+    }
+    lastAudioDataRef.current = audioData
+
+    // Process audio chunk in worker
+    const processAudio = async () => {
+      try {
+        const result = await processAudioChunk(audioData, audioFormat, barCount)
+        setWorkerProcessedBars(result.bars)
+      } catch (error) {
+        console.warn('[AudioWaveform] Worker processing failed:', error)
+        // Fall back to level-based animation
+        setWorkerProcessedBars(null)
+      }
+    }
+
+    processAudio()
+  }, [audioData, audioFormat, barCount, useWorker, processAudioChunk])
+
   // Animation loop
   useEffect(() => {
     if (!isAnimating) {
@@ -69,6 +130,28 @@ export function AudioWaveform({
       }
       lastUpdateRef.current = timestamp
 
+      // If we have worker-processed bars, use them with smooth animation
+      if (workerProcessedBars && workerProcessedBars.length === barCount) {
+        const time = timestamp / 1000
+
+        // Apply subtle wave animation to worker-processed bars for visual interest
+        const animatedBars = workerProcessedBars.map((barHeight, index) => {
+          const pattern = barPatterns[index]
+          const wavePhase = (index / barCount) * Math.PI * 2
+          const timeWave = Math.sin(time * 2 * pattern.speedFactor + pattern.phaseOffset + wavePhase)
+
+          // Small wave contribution on top of actual audio levels
+          const waveEffect = timeWave * 0.05 // ±5% variation
+
+          return Math.max(0.15, Math.min(1, barHeight + waveEffect))
+        })
+
+        setBarHeights(animatedBars)
+        animationRef.current = requestAnimationFrame(animate)
+        return
+      }
+
+      // Fall back to level-based animation
       // Use real audio level if available, otherwise simulate
       const effectiveLevel = level > 0 ? level : generateSimulatedLevel()
       const normalizedLevel = effectiveLevel / 100
@@ -106,7 +189,7 @@ export function AudioWaveform({
         animationRef.current = null
       }
     }
-  }, [isAnimating, level, barCount, barPatterns, generateSimulatedLevel])
+  }, [isAnimating, level, barCount, barPatterns, generateSimulatedLevel, workerProcessedBars])
 
   return (
     <div

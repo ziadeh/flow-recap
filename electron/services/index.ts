@@ -23,8 +23,15 @@ import { resetSubjectAwareNoteGenerationStatements as resetSubjectAwareNoteGener
 // Core database service
 export { getDatabaseService, DatabaseService, CURRENT_SCHEMA_VERSION, migrations } from './database'
 
+// Connection Pool and Statement Cache (WAL optimization features)
+export { getConnectionPool } from './connectionPool'
+export type { PoolStatistics, ConnectionPoolConfig } from './connectionPool'
+export { getStatementCache } from './statementCache'
+export type { CacheStatistics } from './statementCache'
+
 // Entity services
 export { meetingService, resetMeetingStatements } from './meetingService'
+export { meetingCacheService } from './meetingCacheService'
 export { recordingService, resetRecordingStatements } from './recordingService'
 export { transcriptService, resetTranscriptStatements } from './transcriptService'
 export { meetingNoteService, resetMeetingNoteStatements } from './meetingNoteService'
@@ -405,6 +412,13 @@ export type {
   PostRecordingResult
 } from './postRecordingProcessor'
 
+// Redis Cache Service (distributed caching for LLM responses)
+export { redisCacheService, initializeRedisCache, cleanupRedisCache } from './redisCacheService'
+export type {
+  RedisCacheConfig,
+  CacheStats
+} from './redisCacheService'
+
 // Meeting Summary Service (LLM-based meeting summarization)
 export { meetingSummaryService, resetMeetingSummaryConfig } from './meetingSummaryService'
 export type {
@@ -479,6 +493,24 @@ export type {
 // Logger Service (electron-log based logging)
 export { loggerService } from './loggerService'
 export type { LogContext } from './loggerService'
+
+// ============================================================================
+// Service Loader (lazy loading wrapper for bundle code splitting)
+// ============================================================================
+export {
+  getRecordingServices,
+  getRecordingService,
+  getAIInsightsServices,
+  getAIInsightsService,
+  getDiarizationServices,
+  getDiarizationService,
+  getService,
+  preloadServiceChunk,
+  resetServiceCache,
+} from './serviceLoader'
+export type {
+  ServiceName,
+} from './serviceLoader'
 
 // Update Service (automatic updates using electron-updater)
 export { updateService, resetUpdateServiceState } from './updateService'
@@ -667,6 +699,15 @@ export type {
   ValidationMetrics,
   TieredValidationResult
 } from './tieredValidationService'
+
+// ML Preloader Service (background preloading of WhisperX, PyAnnote, diarization)
+export { mlPreloaderService, MLPreloaderService } from './mlPreloaderService'
+export type {
+  PreloadStatus,
+  PreloadModuleStatus,
+  PreloadState,
+  PreloadResult
+} from './mlPreloaderService'
 
 // Python Setup Service (automated environment creation and configuration)
 export { pythonSetupService, PythonSetupService } from './pythonSetupService'

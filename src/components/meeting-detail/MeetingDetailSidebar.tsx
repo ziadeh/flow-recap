@@ -18,7 +18,7 @@ import {
 import { cn } from '../../lib/utils'
 import { formatDuration, formatDateTime } from '../../lib/formatters'
 import type { Meeting, Recording, Speaker, Transcript } from '../../types/database'
-import { useRecordingStore, RecordingStatus } from '../../stores/recording-store'
+import { useRecordingActions, RecordingStatus } from '../../stores/recording-store'
 
 // ============================================================================
 // Types
@@ -594,7 +594,7 @@ function RecordingControlsCard({
     setStartTime,
     setDuration: setGlobalDuration,
     reset: resetGlobalStore
-  } = useRecordingStore()
+  } = useRecordingActions()
 
   // Sync local status with recording state
   useEffect(() => {

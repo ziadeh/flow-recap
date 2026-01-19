@@ -19,16 +19,21 @@ import {
   CheckCircle2,
   Trash2,
   CheckSquare,
-  Square
+  Square,
+  RefreshCw
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useRecordingStore } from '@/stores'
+import { useRecordingStatus, useRecordingMetadata } from '@/stores/recording-store'
+import { useMeetingListStore } from '@/stores/meeting-list-store'
 import { Meeting, MeetingStatus } from '@/types/database'
 import { useNewMeeting } from '@/hooks/useNewMeeting'
+import { useBackgroundMeetingsFetch, useRefreshMeetings } from '@/hooks/useBackgroundMeetingsFetch'
 import { NewMeetingModal } from '@/components/NewMeetingModal'
 import { MeetingListSkeleton } from '@/components/ui/Skeleton'
+import { MeetingCardMetadataSkeleton } from '@/components/ui/MeetingCardMetadataSkeleton'
 import { ProgressBar } from '@/components/ui/ProgressBar'
 import { DeleteMeetingModal } from '@/components/DeleteMeetingModal'
+import { LazyLoadContainer } from '@/components/ui/LazyLoadContainer'
 
 // Utility Functions
 function formatDuration(seconds: number | null): string {
@@ -110,11 +115,16 @@ export function Meetings() {
   const [searchQuery, setSearchQuery] = useState('')
   const [dateRange, setDateRange] = useState<DateRange>('all')
   const [statusFilter, setStatusFilter] = useState<MeetingStatus | 'all'>('all')
-  const [meetings, setMeetings] = useState<Meeting[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const { status: recordingStatus, meetingId: recordingMeetingId } = useRecordingStore()
+  const recordingStatus = useRecordingStatus()
+  const { meetingId: recordingMeetingId } = useRecordingMetadata()
   const { isModalOpen, openModal, closeModal, handleSuccess } = useNewMeeting()
+
+  // Use meeting list store for caching - use individual selectors to prevent infinite loops
+  const meetings = useMeetingListStore(state => state.meetings)
+  const isLoading = useMeetingListStore(state => state.isLoading)
+  const isRefreshing = useMeetingListStore(state => state.isRefreshing)
+  const error = useMeetingListStore(state => state.error)
+  const isStale = useMeetingListStore(state => state.isStale)
 
   // Selection and deletion state
   const [selectionMode, setSelectionMode] = useState(false)
@@ -122,36 +132,55 @@ export function Meetings() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [meetingToDelete, setMeetingToDelete] = useState<string | string[] | null>(null)
 
-  // Fetch meetings from database
+  // Manual refresh function
+  const refreshMeetings = useRefreshMeetings()
+
+  // Get stable store actions using selectors to prevent infinite loops
+  const startLoading = useMeetingListStore(state => state.startLoading)
+  const endLoading = useMeetingListStore(state => state.endLoading)
+  const setMeetingsAction = useMeetingListStore(state => state.setMeetings)
+  const setErrorAction = useMeetingListStore(state => state.setError)
+  const removeMeeting = useMeetingListStore(state => state.removeMeeting)
+  const removeMeetings = useMeetingListStore(state => state.removeMeetings)
+
+  // Initialize with cached data on mount
   useEffect(() => {
-    async function fetchMeetings() {
+    let isCancelled = false
+
+    async function loadMeetings() {
       try {
-        setLoading(true)
-        setError(null)
-        const allMeetings = await window.electronAPI.db.meetings.getAll()
-        setMeetings(allMeetings)
+        // Try to load from cache first
+        if (meetings.length === 0) {
+          startLoading()
+          const allMeetings = await window.electronAPI.db.meetings.getAll()
+          if (!isCancelled) {
+            setMeetingsAction(allMeetings, false)
+          }
+        }
       } catch (err) {
-        console.error('Failed to fetch meetings:', err)
-        setError('Failed to load meetings. Please try again.')
+        if (!isCancelled) {
+          console.error('Failed to fetch meetings:', err)
+          setErrorAction('Failed to load meetings. Please try again.')
+        }
       } finally {
-        setLoading(false)
+        if (!isCancelled) {
+          endLoading()
+        }
       }
     }
-    fetchMeetings()
-  }, [])
+    loadMeetings()
 
-  // Refetch meetings function
-  const refetchMeetings = async () => {
-    try {
-      setLoading(true)
-      const allMeetings = await window.electronAPI.db.meetings.getAll()
-      setMeetings(allMeetings)
-    } catch (err) {
-      console.error('Failed to fetch meetings:', err)
-    } finally {
-      setLoading(false)
+    return () => {
+      isCancelled = true
     }
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Empty dependency array - only run once on mount
+
+  // Enable background fetch to keep data fresh
+  useBackgroundMeetingsFetch({
+    enabled: true,
+    debounceMs: 1000
+  })
 
   // Selection handlers
   const toggleSelection = (meetingId: string, e: React.MouseEvent) => {
@@ -194,10 +223,18 @@ export function Meetings() {
   }
 
   const handleDeleteComplete = () => {
+    // Immediately remove the deleted meeting(s) from the store for instant UI update
+    if (meetingToDelete) {
+      if (Array.isArray(meetingToDelete)) {
+        removeMeetings(meetingToDelete)
+      } else {
+        removeMeeting(meetingToDelete)
+      }
+    }
+
     setDeleteModalOpen(false)
     setMeetingToDelete(null)
     exitSelectionMode()
-    refetchMeetings()
   }
 
   // Filter and sort meetings
@@ -224,6 +261,17 @@ export function Meetings() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Meetings</h1>
           <p className="text-muted-foreground">View and manage your meeting recordings</p>
+          {isStale && !isRefreshing && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+              Data may be outdated •
+              <button
+                onClick={() => refreshMeetings()}
+                className="ml-1 underline hover:font-medium"
+              >
+                Refresh now
+              </button>
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {selectionMode ? (
@@ -267,6 +315,15 @@ export function Meetings() {
                 <CheckSquare className="h-4 w-4" />
                 Select
               </button>
+              {isRefreshing && (
+                <button
+                  disabled
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground"
+                  title="Refreshing meetings..."
+                >
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                </button>
+              )}
               <button
                 onClick={openModal}
                 className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-sm font-medium transition-colors"
@@ -382,7 +439,7 @@ export function Meetings() {
 
       {/* Meetings List */}
       <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
-        {loading ? (
+        {isLoading ? (
           <MeetingListSkeleton count={5} />
         ) : filteredMeetings.length === 0 ? (
           <div className="p-12 text-center">
@@ -421,7 +478,7 @@ export function Meetings() {
       </div>
 
       {/* Results Count */}
-      {!loading && filteredMeetings.length > 0 && (
+      {!isLoading && filteredMeetings.length > 0 && (
         <p className="text-sm text-muted-foreground text-center">
           Showing {filteredMeetings.length} {filteredMeetings.length === 1 ? 'meeting' : 'meetings'}
           {(searchQuery || statusFilter !== 'all' || dateRange !== 'all') && ` (filtered from ${meetings.length} total)`}
@@ -577,43 +634,51 @@ function MeetingCard({
             </button>
           )}
           {!selectionMode && getStatusIcon()}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <h3 className="font-medium text-foreground truncate">{meeting.title}</h3>
-              {getProcessingStatusBadge()}
-            </div>
-            {meeting.description && (
-              <p className="text-sm text-muted-foreground mb-2 line-clamp-1">{meeting.description}</p>
-            )}
-            <div className="flex items-center gap-3 text-sm text-muted-foreground flex-wrap">
-              <span className="flex items-center gap-1">
-                <Calendar className="h-3.5 w-3.5" />
-                {formatDate(meeting.start_time)}
-              </span>
-              <span className="flex items-center gap-1">
-                <Clock className="h-3.5 w-3.5" />
-                {formatTime(meeting.start_time)}
-              </span>
-              <span>
-                Duration: {formatDuration(meeting.duration_seconds)}
-              </span>
-            </div>
-
-            {/* Processing progress indicator */}
-            {isProcessing && (
-              <div className="mt-3">
-                <ProgressBar
-                  indeterminate
-                  variant="warning"
-                  size="xs"
-                  className="max-w-xs"
-                />
-                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                  Processing transcription...
-                </p>
+          {/* Lazy load metadata section */}
+          <LazyLoadContainer
+            fallback={<MeetingCardMetadataSkeleton />}
+            rootMargin="100px"
+            className="flex-1 min-w-0"
+            testId={`meeting-card-metadata-${meeting.id}`}
+          >
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <h3 className="font-medium text-foreground truncate">{meeting.title}</h3>
+                {getProcessingStatusBadge()}
               </div>
-            )}
-          </div>
+              {meeting.description && (
+                <p className="text-sm text-muted-foreground mb-2 line-clamp-1">{meeting.description}</p>
+              )}
+              <div className="flex items-center gap-3 text-sm text-muted-foreground flex-wrap">
+                <span className="flex items-center gap-1">
+                  <Calendar className="h-3.5 w-3.5" />
+                  {formatDate(meeting.start_time)}
+                </span>
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3.5 w-3.5" />
+                  {formatTime(meeting.start_time)}
+                </span>
+                <span>
+                  Duration: {formatDuration(meeting.duration_seconds)}
+                </span>
+              </div>
+
+              {/* Processing progress indicator */}
+              {isProcessing && (
+                <div className="mt-3">
+                  <ProgressBar
+                    indeterminate
+                    variant="warning"
+                    size="xs"
+                    className="max-w-xs"
+                  />
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                    Processing transcription...
+                  </p>
+                </div>
+              )}
+            </div>
+          </LazyLoadContainer>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0 ml-4">
           {!selectionMode && (

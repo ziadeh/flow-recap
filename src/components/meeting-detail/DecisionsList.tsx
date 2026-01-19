@@ -1,3 +1,4 @@
+import { useMemo, memo } from 'react'
 import {
   Gavel,
   Sparkles,
@@ -95,8 +96,9 @@ function ConfidenceIndicator({ confidence }: { confidence: number }) {
 
 /**
  * Decision card for extracted decisions with full metadata
+ * Memoized to prevent re-renders when decision hasn't changed
  */
-function ExtractedDecisionCard({
+const ExtractedDecisionCard = memo(function ExtractedDecisionCard({
   decision,
   showSentiment,
   showConfidence
@@ -147,12 +149,13 @@ function ExtractedDecisionCard({
       </div>
     </div>
   )
-}
+})
 
 /**
  * Simple decision card for notes without full metadata
+ * Memoized to prevent re-renders when note hasn't changed
  */
-function DecisionNoteCard({ note }: { note: MeetingNote }) {
+const DecisionNoteCard = memo(function DecisionNoteCard({ note }: { note: MeetingNote }) {
   return (
     <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
       <div className="flex items-start gap-3">
@@ -176,13 +179,14 @@ function DecisionNoteCard({ note }: { note: MeetingNote }) {
       </div>
     </div>
   )
-}
+})
 
 /**
  * DecisionsList Component
  * Displays extracted decisions from the meeting with sentiment analysis
+ * Memoized to prevent re-renders when props haven't changed
  */
-export function DecisionsList({
+export const DecisionsList = memo(function DecisionsList({
   decisionNotes,
   extractedDecisions = [],
   showSentiment = true,
@@ -190,11 +194,13 @@ export function DecisionsList({
 }: DecisionsListProps) {
   const hasDecisions = decisionNotes.length > 0 || extractedDecisions.length > 0
 
-  // Calculate sentiment summary if we have extracted decisions
-  const sentimentSummary = extractedDecisions.reduce((acc, decision) => {
-    acc[decision.sentiment] = (acc[decision.sentiment] || 0) + 1
-    return acc
-  }, {} as Record<SentimentType, number>)
+  // Memoize sentiment summary calculation to prevent recalculating on every render
+  const sentimentSummary = useMemo(() => {
+    return extractedDecisions.reduce((acc, decision) => {
+      acc[decision.sentiment] = (acc[decision.sentiment] || 0) + 1
+      return acc
+    }, {} as Record<SentimentType, number>)
+  }, [extractedDecisions])
 
   if (!hasDecisions) {
     return (
@@ -305,6 +311,6 @@ export function DecisionsList({
       )}
     </div>
   )
-}
+})
 
 export default DecisionsList

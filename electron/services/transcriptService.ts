@@ -18,6 +18,7 @@ import type Database from 'better-sqlite3'
 import { getDatabaseService } from './database'
 import type { Transcript, CreateTranscriptInput } from '../../src/types/database'
 import type { MandatoryDiarizationSegment } from './diarizationOutputSchema'
+import { getTranscriptCompressionService } from './transcriptCompressionService'
 
 // ============================================================================
 // Types
@@ -85,8 +86,8 @@ function getStatements() {
 
   statements = {
     insert: db.prepare(`
-      INSERT INTO transcripts (id, meeting_id, speaker_id, content, start_time_ms, end_time_ms, confidence, is_final, created_at)
-      VALUES (@id, @meeting_id, @speaker_id, @content, @start_time_ms, @end_time_ms, @confidence, @is_final, datetime('now'))
+      INSERT INTO transcripts (id, meeting_id, speaker_id, content, start_time_ms, end_time_ms, confidence, is_final, is_compressed, content_uncompressed, filler_map, created_at)
+      VALUES (@id, @meeting_id, @speaker_id, @content, @start_time_ms, @end_time_ms, @confidence, @is_final, @is_compressed, @content_uncompressed, @filler_map, datetime('now'))
     `),
 
     getById: db.prepare(`
@@ -126,6 +127,64 @@ function getStatements() {
 }
 
 // ============================================================================
+// Decompression Helpers
+// ============================================================================
+
+/**
+ * Raw transcript row from database before normalization
+ * The content field may contain compressed data (Buffer) when is_compressed is 1
+ */
+interface RawTranscriptRow {
+  id: string
+  meeting_id: string
+  speaker_id: string | null
+  content: string | Buffer | number[]  // May be Buffer when compressed
+  start_time_ms: number
+  end_time_ms: number
+  confidence: number
+  is_final: number  // SQLite stores as 0/1
+  is_compressed: number  // 0 or 1
+  content_uncompressed: string | null
+  filler_map: string | null
+  created_at: string
+}
+
+/**
+ * Normalize a transcript row from the database
+ * Ensures content contains readable text (uses content_uncompressed for compressed transcripts)
+ * Converts SQLite integers to booleans
+ */
+function normalizeTranscript(row: RawTranscriptRow): Transcript {
+  // When transcript is compressed, use content_uncompressed for the content field
+  // This ensures the UI always receives readable text
+  const content = row.is_compressed && row.content_uncompressed
+    ? row.content_uncompressed
+    : (typeof row.content === 'string' ? row.content : '')
+
+  return {
+    id: row.id,
+    meeting_id: row.meeting_id,
+    speaker_id: row.speaker_id,
+    content,
+    start_time_ms: row.start_time_ms,
+    end_time_ms: row.end_time_ms,
+    confidence: row.confidence,
+    is_final: row.is_final === 1,
+    created_at: row.created_at,
+    is_compressed: row.is_compressed === 1,
+    content_uncompressed: row.content_uncompressed ?? undefined,
+    filler_map: row.filler_map ?? undefined
+  }
+}
+
+/**
+ * Normalize an array of transcript rows
+ */
+function normalizeTranscripts(rows: RawTranscriptRow[]): Transcript[] {
+  return rows.map(normalizeTranscript)
+}
+
+// ============================================================================
 // Validation Helpers
 // ============================================================================
 
@@ -151,6 +210,52 @@ function validateSpeakerId(speakerId: string | null | undefined, options: Transc
   }
 }
 
+/**
+ * Helper function to prepare transcript data with compression
+ * Compresses content and prepares all parameters for insertion
+ */
+async function prepareTranscriptWithCompression(
+  id: string,
+  input: CreateTranscriptInput
+): Promise<{
+  id: string
+  meeting_id: string
+  speaker_id: string | null
+  content: Buffer
+  start_time_ms: number
+  end_time_ms: number
+  confidence: number
+  is_final: number
+  is_compressed: number
+  content_uncompressed: string
+  filler_map: string | null
+}> {
+  const compressionService = getTranscriptCompressionService()
+
+  // Store original content
+  const originalContent = input.content
+
+  // Deduplicate filler words
+  const { content: deduplicated, fillerMap } = compressionService.deduplicateFillerWords(originalContent)
+
+  // Compress the deduplicated content
+  const compressedBuffer = await compressionService.compressTranscriptContent(deduplicated)
+
+  return {
+    id,
+    meeting_id: input.meeting_id,
+    speaker_id: input.speaker_id ?? null,
+    content: compressedBuffer,
+    start_time_ms: input.start_time_ms,
+    end_time_ms: input.end_time_ms,
+    confidence: input.confidence ?? 1.0,
+    is_final: input.is_final !== false ? 1 : 0,
+    is_compressed: 1,
+    content_uncompressed: originalContent,
+    filler_map: fillerMap || null
+  }
+}
+
 // ============================================================================
 // Transcript Service Functions
 // ============================================================================
@@ -162,26 +267,20 @@ export const transcriptService = {
    * By default, requires speaker_id to ensure transcription is aligned with
    * diarization data. Use options.requireSpeaker = false for legacy behavior.
    *
+   * NOTE: This method is now async to support compression of transcript content.
+   *
    * @param input - Transcript input data
    * @param options - Creation options (requireSpeaker defaults to true)
    */
-  create(input: CreateTranscriptInput, options: TranscriptCreationOptions = {}): Transcript {
+  async create(input: CreateTranscriptInput, options: TranscriptCreationOptions = {}): Promise<Transcript> {
     // Validate speaker_id requirement
     validateSpeakerId(input.speaker_id, options)
 
     const stmts = getStatements()
     const id = input.id || randomUUID()
 
-    const params = {
-      id,
-      meeting_id: input.meeting_id,
-      speaker_id: input.speaker_id ?? null,
-      content: input.content,
-      start_time_ms: input.start_time_ms,
-      end_time_ms: input.end_time_ms,
-      confidence: input.confidence ?? 1.0,
-      is_final: input.is_final !== false ? 1 : 0
-    }
+    // Prepare transcript with compression
+    const params = await prepareTranscriptWithCompression(id, input)
 
     stmts.insert.run(params)
 
@@ -207,11 +306,12 @@ export const transcriptService = {
    * Create multiple transcript segments in a batch
    *
    * By default, requires speaker_id for all inputs.
+   * NOTE: This method is now async to support compression of transcript content.
    *
    * @param inputs - Array of transcript inputs
    * @param options - Creation options (requireSpeaker defaults to true)
    */
-  createBatch(inputs: CreateTranscriptInput[], options: TranscriptCreationOptions = {}): Transcript[] {
+  async createBatch(inputs: CreateTranscriptInput[], options: TranscriptCreationOptions = {}): Promise<Transcript[]> {
     // Validate all inputs first
     for (const input of inputs) {
       validateSpeakerId(input.speaker_id, options)
@@ -221,23 +321,15 @@ export const transcriptService = {
     const stmts = getStatements()
     const results: Transcript[] = []
 
+    // Prepare all transcripts with compression in parallel
+    const preparedParams = await Promise.all(
+      inputs.map((input) => prepareTranscriptWithCompression(input.id || randomUUID(), input))
+    )
+
     const createAll = dbService.getDatabase().transaction(() => {
-      for (const input of inputs) {
-        const id = input.id || randomUUID()
-
-        const params = {
-          id,
-          meeting_id: input.meeting_id,
-          speaker_id: input.speaker_id ?? null,
-          content: input.content,
-          start_time_ms: input.start_time_ms,
-          end_time_ms: input.end_time_ms,
-          confidence: input.confidence ?? 1.0,
-          is_final: input.is_final !== false ? 1 : 0
-        }
-
+      for (const params of preparedParams) {
         stmts.insert.run(params)
-        results.push(stmts.getById.get(id) as Transcript)
+        results.push(stmts.getById.get(params.id) as Transcript)
       }
     })
 
@@ -251,11 +343,12 @@ export const transcriptService = {
    * This is the main entry point for creating transcripts after aligning
    * transcription with diarization. It ensures all segments have proper
    * speaker attribution.
+   * NOTE: This method is now async to support compression of transcript content.
    *
    * @param meetingId - Meeting ID
    * @param alignedSegments - Segments from temporal alignment service
    */
-  createFromAlignedSegments(
+  async createFromAlignedSegments(
     meetingId: string,
     alignedSegments: Array<{
       text: string
@@ -265,7 +358,7 @@ export const transcriptService = {
       transcriptionConfidence: number
       isFinal: boolean
     }>
-  ): Transcript[] {
+  ): Promise<Transcript[]> {
     const inputs: CreateTranscriptWithSpeakerInput[] = alignedSegments.map(segment => ({
       meeting_id: meetingId,
       speaker_id: segment.speakerId,
@@ -284,7 +377,8 @@ export const transcriptService = {
    */
   getById(id: string): Transcript | null {
     const stmts = getStatements()
-    return (stmts.getById.get(id) as Transcript) || null
+    const row = stmts.getById.get(id) as RawTranscriptRow | undefined
+    return row ? normalizeTranscript(row) : null
   },
 
   /**
@@ -292,7 +386,8 @@ export const transcriptService = {
    */
   getByMeetingId(meetingId: string): Transcript[] {
     const stmts = getStatements()
-    return stmts.getByMeetingId.all(meetingId) as Transcript[]
+    const rows = stmts.getByMeetingId.all(meetingId) as RawTranscriptRow[]
+    return normalizeTranscripts(rows)
   },
 
   /**
@@ -310,7 +405,8 @@ export const transcriptService = {
     const limit = options.limit ?? 50
     const offset = options.offset ?? 0
 
-    const data = stmts.getByMeetingIdPaginated.all(meetingId, limit, offset) as Transcript[]
+    const rows = stmts.getByMeetingIdPaginated.all(meetingId, limit, offset) as RawTranscriptRow[]
+    const data = normalizeTranscripts(rows)
     const countResult = stmts.getCountByMeetingId.get(meetingId) as { count: number }
     const total = countResult.count
 
@@ -353,7 +449,8 @@ export const transcriptService = {
    */
   getBySpeakerId(speakerId: string): Transcript[] {
     const stmts = getStatements()
-    return stmts.getBySpeakerId.all(speakerId) as Transcript[]
+    const rows = stmts.getBySpeakerId.all(speakerId) as RawTranscriptRow[]
+    return normalizeTranscripts(rows)
   },
 
   /**
@@ -553,16 +650,17 @@ export const transcriptService = {
       WHERE fts.meeting_id = ?
         AND transcripts_fts MATCH ?
       ORDER BY t.start_time_ms ASC
-    `).all(meetingId, `"${sanitizedQuery}"`) as Array<Transcript & { snippet: string }>
+    `).all(meetingId, `"${sanitizedQuery}"`) as Array<RawTranscriptRow & { snippet: string }>
 
     return results.map(row => {
-      const { snippet, ...transcript } = row
+      const { snippet, ...rawTranscript } = row
+      const transcript = normalizeTranscript(rawTranscript)
 
       // Parse match positions from content
       const matchPositions = findMatchPositions(transcript.content, sanitizedQuery)
 
       return {
-        transcript: transcript as Transcript,
+        transcript,
         snippet,
         matchPositions
       }
@@ -603,12 +701,13 @@ export const transcriptService = {
       WHERE transcripts_fts MATCH ?
       ORDER BY rank
       LIMIT ?
-    `).all(`"${sanitizedQuery}"`, limit) as Array<Transcript & { snippet: string }>
+    `).all(`"${sanitizedQuery}"`, limit) as Array<RawTranscriptRow & { snippet: string }>
 
     return results.map(row => {
-      const { snippet, ...transcript } = row
+      const { snippet, ...rawTranscript } = row
+      const transcript = normalizeTranscript(rawTranscript)
       return {
-        transcript: transcript as Transcript,
+        transcript,
         meetingId: transcript.meeting_id,
         snippet
       }
@@ -671,6 +770,56 @@ export const transcriptService = {
     `).all(meetingId, `"${sanitizedQuery}"`) as Array<{ id: string }>
 
     return results.map(r => r.id)
+  },
+
+  /**
+   * Get compression statistics for a meeting
+   *
+   * @param meetingId - Meeting ID
+   * @returns Compression statistics including sizes and ratios
+   */
+  getCompressionStats(meetingId: string): {
+    totalOriginalSize: number
+    totalCompressedSize: number
+    totalCompressionRatio: number
+    compressedCount: number
+    uncompressedCount: number
+  } {
+    const compressionService = getTranscriptCompressionService()
+    const db = getDatabaseService().getDatabase()
+
+    const result = db.prepare(`
+      SELECT
+        SUM(CASE WHEN is_compressed = 1 THEN LENGTH(content_uncompressed) ELSE 0 END) as compressed_original_size,
+        SUM(CASE WHEN is_compressed = 1 THEN LENGTH(content) ELSE 0 END) as compressed_data_size,
+        SUM(CASE WHEN is_compressed = 0 THEN LENGTH(content) ELSE 0 END) as uncompressed_size,
+        SUM(CASE WHEN is_compressed = 1 THEN 1 ELSE 0 END) as compressed_count,
+        SUM(CASE WHEN is_compressed = 0 THEN 1 ELSE 0 END) as uncompressed_count
+      FROM transcripts
+      WHERE meeting_id = ?
+    `).get(meetingId) as {
+      compressed_original_size: number | null
+      compressed_data_size: number | null
+      uncompressed_size: number | null
+      compressed_count: number
+      uncompressed_count: number
+    }
+
+    const compressedOriginal = result.compressed_original_size || 0
+    const compressedData = result.compressed_data_size || 0
+    const uncompressedData = result.uncompressed_size || 0
+
+    const totalOriginalSize = compressedOriginal + uncompressedData
+    const totalCompressedSize = compressedData + uncompressedData
+    const totalCompressionRatio = totalOriginalSize > 0 ? 1 - totalCompressedSize / totalOriginalSize : 0
+
+    return {
+      totalOriginalSize,
+      totalCompressedSize,
+      totalCompressionRatio,
+      compressedCount: result.compressed_count,
+      uncompressedCount: result.uncompressed_count
+    }
   }
 }
 

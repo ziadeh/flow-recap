@@ -8,14 +8,20 @@
 import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { AudioWaveform } from './AudioWaveform'
-import { useRecordingStore } from '@/stores/recording-store'
+import {
+  useRecordingStatus,
+  useRecordingStartTime,
+  useAudioLevel,
+} from '@/stores/recording-store'
 
 interface RecordingIndicatorProps {
   className?: string
 }
 
 export function RecordingIndicator({ className }: RecordingIndicatorProps) {
-  const { status, startTime, audioLevel } = useRecordingStore()
+  const status = useRecordingStatus()
+  const startTime = useRecordingStartTime()
+  const audioLevel = useAudioLevel()
   const [elapsedTime, setElapsedTime] = useState(0)
 
   const isRecording = status === 'recording' || status === 'paused'

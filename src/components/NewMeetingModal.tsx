@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Modal } from './Modal';
 import { Loader2, AlertCircle } from 'lucide-react';
+import type { Meeting } from '@/types/database';
 
 interface NewMeetingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: (meetingId: string) => void;
+  onSuccess?: (meeting: Meeting) => void;
 }
 
 type MeetingType = 'one-on-one' | 'team' | 'webinar' | 'other';
@@ -117,9 +118,10 @@ export function NewMeetingModal({ isOpen, onClose, onSuccess }: NewMeetingModalP
 
       const meeting = await window.electronAPI.db.meetings.create(input);
 
-      // Call success callback if provided
+      // Call success callback if provided - pass the full meeting object
+      // so the list can be updated immediately
       if (onSuccess) {
-        onSuccess(meeting.id);
+        onSuccess(meeting);
       }
 
       // Close modal

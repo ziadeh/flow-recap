@@ -3,22 +3,40 @@
  *
  * Displays real-time transcript segments during active recording sessions.
  * Shows transcription status, progress, and handles auto-scrolling for new content.
+ *
+ * Performance: Uses react-window virtualization for long transcripts
+ * to maintain smooth scrolling with thousands of segments.
  */
 
-import { useRef, useEffect, useMemo, memo } from 'react'
+import { useRef, useEffect, useMemo, memo, useCallback } from 'react'
 import { Loader2, AlertCircle, Mic, MicOff, Radio } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { TranscriptSegment } from './TranscriptSegment'
 import { LiveSpeakerTimeline } from './LiveSpeakerTimeline'
 import {
+  VirtualizedTranscriptList,
+  type VirtualizedTranscriptListRef,
+} from './VirtualizedTranscriptList'
+import {
   buildSpeakerColorIndex,
   groupTranscriptsBySpeaker,
+  type TranscriptGroup,
 } from './transcript-utils'
 import { useSpeakerNameStore } from '../../stores/speaker-name-store'
 import { CurrentSpeakerBadge } from '../recording/CurrentSpeakerBadge'
 import type { LiveTranscriptSegment, LiveTranscriptStatus, LiveTranscriptError, TranscriptionProgress } from '../../stores/live-transcript-store'
 import type { Transcript, Speaker } from '../../types/database'
 import { ProgressBar } from '../ui/ProgressBar'
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/** Minimum number of transcript groups before virtualization kicks in */
+const VIRTUALIZATION_THRESHOLD = 30
+
+/** Default height for the virtualized list container */
+const DEFAULT_LIST_HEIGHT = 400
 
 // ============================================================================
 // Types
@@ -41,6 +59,10 @@ export interface LiveTranscriptViewerProps {
   recordingDuration?: number
   /** Additional class names */
   className?: string
+  /** Height of the virtualized list container (default: 400) */
+  listHeight?: number
+  /** Whether to use virtualization (default: auto based on item count) */
+  enableVirtualization?: boolean
 }
 
 // ============================================================================
@@ -439,9 +461,12 @@ export const LiveTranscriptViewer = memo(function LiveTranscriptViewer({
   autoScroll = true,
   recordingDuration = 0,
   className,
+  listHeight = DEFAULT_LIST_HEIGHT,
+  enableVirtualization,
 }: LiveTranscriptViewerProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const lastSegmentRef = useRef<HTMLDivElement>(null)
+  const virtualListRef = useRef<VirtualizedTranscriptListRef>(null)
 
   // Get dynamic speaker names from store
   const speakerNameMap = useSpeakerNameStore((state) => state.speakers)
@@ -488,15 +513,44 @@ export const LiveTranscriptViewer = memo(function LiveTranscriptViewer({
     [transcripts, speakers, speakerColorIndex, dynamicSpeakerNameOverrides]
   )
 
+  // Determine if virtualization should be used
+  const shouldVirtualize = useMemo(() => {
+    if (enableVirtualization !== undefined) return enableVirtualization
+    return groupedTranscripts.length >= VIRTUALIZATION_THRESHOLD
+  }, [enableVirtualization, groupedTranscripts.length])
+
   // Auto-scroll to the latest content when new segments arrive
   useEffect(() => {
-    if (autoScroll && lastSegmentRef.current && (status === 'active' || status === 'processing')) {
-      lastSegmentRef.current.scrollIntoView({
-        behavior: 'smooth',
-        block: 'end',
-      })
+    if (autoScroll && (status === 'active' || status === 'processing')) {
+      if (shouldVirtualize) {
+        // Use virtualized list scrolling to last item
+        if (groupedTranscripts.length > 0) {
+          virtualListRef.current?.scrollToItem(groupedTranscripts.length - 1, 'end')
+        }
+      } else if (lastSegmentRef.current) {
+        // Use DOM scrolling for non-virtualized list
+        lastSegmentRef.current.scrollIntoView({
+          behavior: 'smooth',
+          block: 'end',
+        })
+      }
     }
-  }, [segments.length, autoScroll, status])
+  }, [segments.length, autoScroll, status, shouldVirtualize, groupedTranscripts.length])
+
+  // Render a single transcript segment (used by virtualized list)
+  const renderTranscriptGroup = useCallback(
+    (group: TranscriptGroup, index: number, _isScrolling: boolean) => (
+      <TranscriptSegment
+        key={`live-group-${index}-${group.entries[0]?.id}`}
+        group={group}
+        // No active transcript highlighting during live mode
+        activeTranscriptId={undefined}
+        // No seek functionality during live mode
+        onSeekAudio={undefined}
+      />
+    ),
+    []
+  )
 
   // Format duration for display
   const formatDuration = (ms: number) => {
@@ -555,53 +609,70 @@ export const LiveTranscriptViewer = memo(function LiveTranscriptViewer({
       {error && <ErrorDisplay error={error} />}
 
       {/* Transcript content */}
-      <div
-        ref={scrollContainerRef}
-        className="space-y-4 max-h-[60vh] overflow-y-auto"
-      >
-        {segments.length === 0 ? (
-          <EmptyState status={status} />
-        ) : (
-          <>
-            {groupedTranscripts.map((group, groupIndex) => (
-              <div
-                key={`live-group-${groupIndex}-${group.entries[0]?.id}`}
-                ref={groupIndex === groupedTranscripts.length - 1 ? lastSegmentRef : undefined}
-              >
-                <TranscriptSegment
-                  group={group}
-                  // No active transcript highlighting during live mode
-                  activeTranscriptId={undefined}
-                  // No seek functionality during live mode
-                  onSeekAudio={undefined}
-                />
-              </div>
-            ))}
-
-            {/* Processing indicator */}
-            {status === 'processing' && (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="w-5 h-5 animate-spin text-purple-600 mr-2" />
-                <span className="text-sm text-muted-foreground">
-                  Processing final segments...
-                </span>
-              </div>
-            )}
-
-            {/* Active listening indicator */}
-            {status === 'active' && segments.length > 0 && (
-              <div className="flex items-center gap-2 py-3 px-4 bg-green-50 rounded-lg border border-green-200">
-                <div className="flex space-x-1">
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+      {segments.length === 0 ? (
+        <EmptyState status={status} />
+      ) : (
+        <>
+          {shouldVirtualize ? (
+            /* Virtualized rendering for long transcripts */
+            <VirtualizedTranscriptList
+              ref={virtualListRef}
+              items={groupedTranscripts}
+              height={listHeight}
+              renderItem={renderTranscriptGroup}
+              estimatedItemHeight={100}
+              overscanCount={3}
+              virtualizationThreshold={VIRTUALIZATION_THRESHOLD}
+              getItemKey={(group, index) => `live-group-${index}-${group.entries[0]?.id}`}
+              className="space-y-4"
+            />
+          ) : (
+            /* Standard rendering for short transcripts */
+            <div
+              ref={scrollContainerRef}
+              className="space-y-4 max-h-[60vh] overflow-y-auto"
+              data-virtualized="false"
+            >
+              {groupedTranscripts.map((group, groupIndex) => (
+                <div
+                  key={`live-group-${groupIndex}-${group.entries[0]?.id}`}
+                  ref={groupIndex === groupedTranscripts.length - 1 ? lastSegmentRef : undefined}
+                >
+                  <TranscriptSegment
+                    group={group}
+                    // No active transcript highlighting during live mode
+                    activeTranscriptId={undefined}
+                    // No seek functionality during live mode
+                    onSeekAudio={undefined}
+                  />
                 </div>
-                <span className="text-sm text-green-700">Listening...</span>
+              ))}
+            </div>
+          )}
+
+          {/* Processing indicator */}
+          {status === 'processing' && (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="w-5 h-5 animate-spin text-purple-600 mr-2" />
+              <span className="text-sm text-muted-foreground">
+                Processing final segments...
+              </span>
+            </div>
+          )}
+
+          {/* Active listening indicator */}
+          {status === 'active' && segments.length > 0 && (
+            <div className="flex items-center gap-2 py-3 px-4 bg-green-50 rounded-lg border border-green-200">
+              <div className="flex space-x-1">
+                <span className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
               </div>
-            )}
-          </>
-        )}
-      </div>
+              <span className="text-sm text-green-700">Listening...</span>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 })

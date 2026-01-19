@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo, memo } from 'react'
 import {
   CheckCircle,
   Circle,
@@ -67,8 +67,9 @@ function StatusBadge({ status }: { status: TaskStatus }) {
 
 /**
  * Single action item card component
+ * Memoized to prevent re-renders when task hasn't changed
  */
-function ActionItemCard({
+const ActionItemCard = memo(function ActionItemCard({
   task,
   onStatusChange
 }: {
@@ -166,13 +167,14 @@ function ActionItemCard({
       </div>
     </div>
   )
-}
+})
 
 /**
  * ActionItemsList Component
  * Displays extracted action items and tasks in an organized list
+ * Memoized to prevent re-renders when props haven't changed
  */
-export function ActionItemsList({
+export const ActionItemsList = memo(function ActionItemsList({
   tasks,
   showFilters = true,
   onTaskStatusChange
@@ -180,36 +182,40 @@ export function ActionItemsList({
   const [filter, setFilter] = useState<FilterType>('all')
   const [sortBy, setSortBy] = useState<'priority' | 'date' | 'status'>('priority')
 
-  // Sort tasks
-  const sortedTasks = [...tasks].sort((a, b) => {
-    if (sortBy === 'priority') {
-      const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 }
-      return priorityOrder[a.priority] - priorityOrder[b.priority]
-    }
-    if (sortBy === 'status') {
-      const statusOrder = { pending: 0, in_progress: 1, completed: 2, cancelled: 3 }
-      return statusOrder[a.status] - statusOrder[b.status]
-    }
-    // date - newest first
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  })
+  // Memoize sorted tasks to avoid re-sorting on every render
+  const sortedTasks = useMemo(() => {
+    return [...tasks].sort((a, b) => {
+      if (sortBy === 'priority') {
+        const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 }
+        return priorityOrder[a.priority] - priorityOrder[b.priority]
+      }
+      if (sortBy === 'status') {
+        const statusOrder = { pending: 0, in_progress: 1, completed: 2, cancelled: 3 }
+        return statusOrder[a.status] - statusOrder[b.status]
+      }
+      // date - newest first
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
+  }, [tasks, sortBy])
 
-  // Filter tasks
-  const filteredTasks = sortedTasks.filter((task) => {
-    if (filter === 'all') return true
-    if (filter in priorityConfig) return task.priority === filter
-    if (filter in statusConfig) return task.status === filter
-    return true
-  })
+  // Memoize filtered tasks
+  const filteredTasks = useMemo(() => {
+    return sortedTasks.filter((task) => {
+      if (filter === 'all') return true
+      if (filter in priorityConfig) return task.priority === filter
+      if (filter in statusConfig) return task.status === filter
+      return true
+    })
+  }, [sortedTasks, filter])
 
-  // Count stats
-  const stats = {
+  // Memoize stats calculation to prevent recalculating on every render
+  const stats = useMemo(() => ({
     total: tasks.length,
     pending: tasks.filter(t => t.status === 'pending').length,
     inProgress: tasks.filter(t => t.status === 'in_progress').length,
     completed: tasks.filter(t => t.status === 'completed').length,
     overdue: tasks.filter(t => t.due_date && t.status !== 'completed' && isOverdue(t.due_date)).length,
-  }
+  }), [tasks])
 
   if (tasks.length === 0) {
     return (
@@ -314,6 +320,6 @@ export function ActionItemsList({
       )}
     </div>
   )
-}
+})
 
 export default ActionItemsList

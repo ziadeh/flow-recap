@@ -40,13 +40,13 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-  useRealtimeInsightsStore,
   useInsightsMetrics,
   useInsightsExpandedSections,
   useInsightsProcessing,
   useInsightsSpeakerParticipation,
   useInsightsLowConfidenceSegments,
   useInsightsNoteCounts,
+  useInsightsPanelActions,
   type InsightsPanelSection,
   type SpeakerParticipation,
   type LowConfidenceSegment,
@@ -521,19 +521,21 @@ export function RealtimeInsightsPanel({
   onClose,
   onExport,
 }: RealtimeInsightsPanelProps) {
-  // Store state - extract only actions to avoid re-renders
-  const initializePanel = useRealtimeInsightsStore((state) => state.initializePanel)
-  const closePanel = useRealtimeInsightsStore((state) => state.closePanel)
-  const updateElapsedTime = useRealtimeInsightsStore((state) => state.updateElapsedTime)
-  const updateActiveSpeaker = useRealtimeInsightsStore((state) => state.updateActiveSpeaker)
-  const updateMetrics = useRealtimeInsightsStore((state) => state.updateMetrics)
-  const updateSpeakerParticipation = useRealtimeInsightsStore((state) => state.updateSpeakerParticipation)
-  const updateNoteCounts = useRealtimeInsightsStore((state) => state.updateNoteCounts)
-  const setProcessing = useRealtimeInsightsStore((state) => state.setProcessing)
-  const toggleSection = useRealtimeInsightsStore((state) => state.toggleSection)
-  const startExport = useRealtimeInsightsStore((state) => state.startExport)
-  const completeExport = useRealtimeInsightsStore((state) => state.completeExport)
-  const getExportSnapshot = useRealtimeInsightsStore((state) => state.getExportSnapshot)
+  // Store actions - use composite hook to avoid 11+ separate subscriptions
+  const {
+    initializePanel,
+    closePanel,
+    updateElapsedTime,
+    updateActiveSpeaker,
+    updateMetrics,
+    updateSpeakerParticipation,
+    updateNoteCounts,
+    setProcessing,
+    toggleSection,
+    startExport,
+    completeExport,
+    getExportSnapshot,
+  } = useInsightsPanelActions()
 
   const metrics = useInsightsMetrics()
   const expandedSections = useInsightsExpandedSections()

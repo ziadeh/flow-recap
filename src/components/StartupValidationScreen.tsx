@@ -7,15 +7,31 @@
  * - Option to skip and start immediately
  * - Displays validation progress
  * - Automatically proceeds once Tier 1 validation completes
+ * - Triggers background ML preloading after Tier 2 completes
  *
  * This component replaces the simple "Loading..." message in App.tsx
  * with a more informative startup screen that runs fast Tier 1 validation
  * then kicks off Tier 2 in the background.
+ *
+ * ML Preloading Strategy:
+ * - After Tier 2 validation completes, start preloading WhisperX, PyAnnote, and diarization
+ * - This warms up Python environments and caches import results
+ * - Non-blocking to ensure smooth UI render
+ * - Tracks preload status for just-in-time initialization when recording starts
  */
 
 import { useState, useEffect, useCallback } from 'react'
 import { Loader2, Play, CheckCircle, AlertTriangle, XCircle, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+// Delay before starting ML model preload after Tier 2 validation completes
+// This follows the idle-until-urgent pattern: UI gets time to settle,
+// then models are preloaded in background during idle time
+const ML_PRELOAD_DELAY_MS = 2000; // 2 seconds
 
 // ============================================================================
 // Types
@@ -86,6 +102,22 @@ export function StartupValidationScreen({ onComplete, onSkip }: StartupValidatio
       // Start Tier 2 in background (non-blocking)
       api.tieredValidation.runTier2().then(() => {
         setTier2Running(false)
+
+        // After Tier 2 completes, wait 2 seconds before preloading
+        // This uses the idle-until-urgent pattern: let UI settle, then warm up models
+        setTimeout(() => {
+          // Start ML preloading in background
+          // This warms up WhisperX, PyAnnote, and diarization modules
+          // so they're ready when the user starts recording
+          if (api?.mlPreloader) {
+            console.log(`[Startup] Triggering background ML preloading (${ML_PRELOAD_DELAY_MS}ms after Tier 2 validation)`)
+            api.mlPreloader.startPreload().then((result: { success: boolean; duration: number }) => {
+              console.log('[Startup] ML preload complete:', result.success ? 'success' : 'partial/failed', `(${result.duration}ms)`)
+            }).catch((err: Error) => {
+              console.warn('[Startup] ML preload error (non-critical):', err)
+            })
+          }
+        }, ML_PRELOAD_DELAY_MS)
       }).catch((err: Error) => {
         console.error('Tier 2 validation error:', err)
         setTier2Running(false)

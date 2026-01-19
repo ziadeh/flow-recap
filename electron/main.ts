@@ -93,6 +93,7 @@ import {
   closeDatabase,
   getDatabaseService,
   meetingService,
+  meetingCacheService,
   recordingService,
   transcriptService,
   meetingNoteService,
@@ -195,6 +196,7 @@ import type {
   LiveTranscriptionConfig,
   BatchDiarizationOptions
 } from './services'
+import { ipcEventBatcher } from './services/ipcEventBatcher'
 
 // The built directory structure
 //
@@ -641,6 +643,9 @@ app.whenReady().then(async () => {
   // Set up IPC handlers for tiered validation (progressive startup validation)
   setupTieredValidationIPC()
 
+  // Set up IPC handlers for ML preloader (background preloading of WhisperX, PyAnnote, diarization)
+  setupMLPreloaderIPC()
+
   // Set up IPC handlers for model manager (download/manage ML models)
   setupModelManagerIPC()
 
@@ -698,32 +703,32 @@ app.on('before-quit', () => {
 
 function setupDatabaseIPC() {
   // ===== Meeting Handlers =====
-  ipcMain.handle('db:meetings:create', (_event, input: CreateMeetingInput) => {
-    return meetingService.create(input)
+  ipcMain.handle('db:meetings:create', async (_event, input: CreateMeetingInput) => {
+    return await meetingCacheService.create(input)
   })
 
-  ipcMain.handle('db:meetings:getById', (_event, id: string) => {
-    return meetingService.getById(id)
+  ipcMain.handle('db:meetings:getById', async (_event, id: string) => {
+    return await meetingCacheService.getById(id)
   })
 
-  ipcMain.handle('db:meetings:getAll', () => {
-    return meetingService.getAll()
+  ipcMain.handle('db:meetings:getAll', async () => {
+    return await meetingCacheService.getAll()
   })
 
-  ipcMain.handle('db:meetings:update', (_event, id: string, input: UpdateMeetingInput) => {
-    return meetingService.update(id, input)
+  ipcMain.handle('db:meetings:update', async (_event, id: string, input: UpdateMeetingInput) => {
+    return await meetingCacheService.update(id, input)
   })
 
-  ipcMain.handle('db:meetings:delete', (_event, id: string) => {
-    return meetingService.delete(id)
+  ipcMain.handle('db:meetings:delete', async (_event, id: string) => {
+    return await meetingCacheService.delete(id)
   })
 
-  ipcMain.handle('db:meetings:getByStatus', (_event, status: MeetingStatus) => {
-    return meetingService.getByStatus(status)
+  ipcMain.handle('db:meetings:getByStatus', async (_event, status: MeetingStatus) => {
+    return await meetingCacheService.getByStatus(status)
   })
 
-  ipcMain.handle('db:meetings:getRecent', (_event, limit: number) => {
-    return meetingService.getRecent(limit)
+  ipcMain.handle('db:meetings:getRecent', async (_event, limit: number) => {
+    return await meetingCacheService.getRecent(limit)
   })
 
   // ===== Recording Handlers =====
@@ -1019,15 +1024,16 @@ function setupRecordingIPC() {
             } else {
               console.error('[Main] Failed to persist live insights:', persistResult.error)
 
-              // Notify frontend of failure
+              // Notify frontend of failure (CRITICAL - error must reach immediately)
               if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('liveInsights:persisted', {
+                const errorData = {
                   success: false,
                   tasksCreated: 0,
                   notesCreated: 0,
                   meetingId: result.meetingId,
                   error: persistResult.error?.message
-                })
+                }
+                ipcEventBatcher.sendCriticalEvent('liveInsights:persisted', errorData)
               }
             }
           } else {
@@ -1037,15 +1043,16 @@ function setupRecordingIPC() {
           console.error('[Main] Exception while persisting live insights:', persistError)
           // Don't block recording completion - log error and continue
 
-          // Notify frontend of failure
+          // Notify frontend of failure (CRITICAL - error must reach immediately)
           if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('liveInsights:persisted', {
+            const errorData = {
               success: false,
               tasksCreated: 0,
               notesCreated: 0,
               meetingId: result.meetingId,
               error: persistError instanceof Error ? persistError.message : 'Unknown error'
-            })
+            }
+            ipcEventBatcher.sendCriticalEvent('liveInsights:persisted', errorData)
           }
         }
 
@@ -1090,8 +1097,8 @@ function setupRecordingIPC() {
                 notesCreated: processingResult.summaryNotesCreated || []
               })
             } else if (processingResult.error) {
-              // Notify frontend about summary generation failure
-              mainWindow.webContents.send('recording:summaryGenerationFailed', {
+              // Notify frontend about summary generation failure (CRITICAL - error)
+              ipcEventBatcher.sendCriticalEvent('recording:summaryGenerationFailed', {
                 meetingId: result.meetingId,
                 error: processingResult.error,
                 errorType: 'unknown'
@@ -1100,9 +1107,9 @@ function setupRecordingIPC() {
           }
         }).catch(err => {
           console.error('[Main] Post-recording processing failed:', err)
-          // Notify frontend about summary generation failure
+          // Notify frontend about summary generation failure (CRITICAL - error)
           if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('recording:summaryGenerationFailed', {
+            ipcEventBatcher.sendCriticalEvent('recording:summaryGenerationFailed', {
               meetingId: result.meetingId,
               error: err instanceof Error ? err.message : String(err),
               errorType: 'unknown'
@@ -1608,17 +1615,25 @@ function setupMlPipelineIPC() {
 
 function setupLiveTranscriptionIPC() {
   // Set up progress subscription for the entire app lifecycle
-  // This forwards all progress events to the renderer
+  // This forwards all progress events to the renderer via batched updates
+  // BATCHED: Progress events are consolidated every 500ms to prevent UI stuttering
   liveTranscriptionService.onProgress((progress) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
+      // Buffer for batched delivery instead of immediate send
+      ipcEventBatcher.bufferLiveTranscriptionProgress(progress)
+      // Also send immediately for backward compatibility (can be removed once renderer uses batched events)
       mainWindow.webContents.send('liveTranscription:progress', progress)
     }
   })
 
   // Set up segment subscription for the entire app lifecycle
   // This forwards new transcript segments to the renderer in real-time
+  // BATCHED: Segments are consolidated every 500ms to prevent UI stuttering
   liveTranscriptionService.onSegment((segment) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
+      // Buffer for batched delivery instead of immediate send
+      ipcEventBatcher.bufferLiveTranscriptionSegment(segment)
+      // Also send immediately for backward compatibility (can be removed once renderer uses batched events)
       mainWindow.webContents.send('liveTranscription:segment', segment)
     }
   })
@@ -1627,8 +1642,12 @@ function setupLiveTranscriptionIPC() {
   // This forwards diarization availability/error status to the renderer
   // CRITICAL: This enables the UI to show proper error messages when diarization fails
   // (e.g., due to missing HF_TOKEN for pyannote/embedding model)
+  // BATCHED: Status updates are consolidated every 500ms
   liveTranscriptionService.onDiarizationStatus((status) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
+      // Buffer for batched delivery
+      ipcEventBatcher.bufferDiarizationStatus(status)
+      // Also send immediately for backward compatibility
       mainWindow.webContents.send('liveTranscription:diarizationStatus', status)
 
       // Log the status for debugging
@@ -1648,6 +1667,10 @@ function setupLiveTranscriptionIPC() {
     config?: LiveTranscriptionConfig
   ) => {
     console.log('[Main] liveTranscription:startSession', { meetingId, audioPath, config })
+    // Start the IPC event batcher for batched updates
+    // This consolidates rapid-fire events every 500ms to prevent UI stuttering
+    ipcEventBatcher.start()
+    console.log('[Main] IPC event batcher started for live session')
     const result = await liveTranscriptionService.startSession(meetingId, audioPath, config)
     console.log('[Main] liveTranscription:startSession result:', result)
     return result
@@ -1681,6 +1704,10 @@ function setupLiveTranscriptionIPC() {
 
   // Stop live transcription session
   ipcMain.handle('liveTranscription:stopSession', async () => {
+    // Stop the IPC event batcher and flush any remaining events
+    ipcEventBatcher.stop()
+    ipcEventBatcher.reset()
+    console.log('[Main] IPC event batcher stopped for live session')
     return liveTranscriptionService.stopSession()
   })
 
@@ -1865,36 +1892,61 @@ function setupCoreDiarizationIPC() {
 
 function setupStreamingDiarizationIPC() {
   // Set up event subscriptions for real-time speaker segments
+  // BATCHED: Speaker segments are consolidated every 500ms to prevent UI stuttering
   streamingDiarizationService.onSpeakerSegment((segment) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
+      // Buffer for batched delivery
+      ipcEventBatcher.bufferStreamingDiarizationSegment(segment)
+      // Also send immediately for backward compatibility
       mainWindow.webContents.send('streamingDiarization:segment', segment)
     }
   })
 
   // Forward speaker change events
+  // BATCHED: Speaker changes are consolidated every 500ms
   streamingDiarizationService.onSpeakerChange((event) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
+      // Buffer for batched delivery
+      ipcEventBatcher.bufferSpeakerChange(event)
+      // Also send immediately for backward compatibility
       mainWindow.webContents.send('streamingDiarization:speakerChange', event)
     }
   })
 
   // Forward status updates
+  // BATCHED: Status updates are consolidated every 500ms
   streamingDiarizationService.onStatus((status) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
+      // Buffer for batched delivery
+      ipcEventBatcher.bufferStreamingDiarizationStatus(status)
+      // Also send immediately for backward compatibility
       mainWindow.webContents.send('streamingDiarization:status', status)
     }
   })
 
   // Forward retroactive corrections
+  // BATCHED: Corrections are consolidated every 500ms
   streamingDiarizationService.onCorrection((event) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
+      // Buffer for batched delivery
+      ipcEventBatcher.bufferCorrection({
+        segmentId: event.segmentId,
+        oldSpeaker: event.oldSpeaker,
+        newSpeaker: event.newSpeaker,
+        timestamp: Date.now()
+      })
+      // Also send immediately for backward compatibility
       mainWindow.webContents.send('streamingDiarization:correction', event)
     }
   })
 
   // Forward speaker statistics updates
+  // BATCHED: Stats are consolidated every 500ms (only latest is kept)
   streamingDiarizationService.onStats((stats) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
+      // Buffer for batched delivery
+      ipcEventBatcher.bufferStats(stats)
+      // Also send immediately for backward compatibility
       mainWindow.webContents.send('streamingDiarization:stats', stats)
     }
   })
@@ -1983,19 +2035,21 @@ function setupStreamingDiarizationIPC() {
 
 async function setupDiarizationFailureIPC() {
   // Set up failure event subscription for the entire app lifecycle
-  // This forwards failure events to the renderer for immediate display
+  // This forwards failure events to the renderer for immediate display via priority queue
   diarizationFailureService.onFailure((failure) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      console.log('[Main] Forwarding diarization failure to renderer:', failure.id)
-      mainWindow.webContents.send('diarizationFailure:failure', failure)
+      console.log('[Main] Forwarding diarization failure to renderer (CRITICAL):', failure.id)
+      // Use priority queue to ensure immediate delivery (not batched)
+      ipcEventBatcher.sendCriticalEvent('diarizationFailure:failure', failure)
     }
   })
 
   // Forward notification events
   diarizationFailureService.onNotification((notification) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      console.log('[Main] Forwarding diarization failure notification:', notification.failureId)
-      mainWindow.webContents.send('diarizationFailure:notification', notification)
+      console.log('[Main] Forwarding diarization failure notification (CRITICAL):', notification.failureId)
+      // Use priority queue to ensure immediate delivery (not batched)
+      ipcEventBatcher.sendCriticalEvent('diarizationFailure:notification', notification)
     }
   })
 
@@ -2136,26 +2190,29 @@ async function setupDiarizationFailureIPC() {
   const { diarizationHealthMonitor } = await import('./services/diarizationHealthMonitor')
   const { diarizationFallbackService } = await import('./services/diarizationFallbackService')
 
-  // Forward health change events to renderer
+  // Forward health change events to renderer (CRITICAL - health status changes are blocking)
   diarizationHealthMonitor.onHealthChange((event) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      console.log('[Main] Forwarding diarization health change:', event.status)
-      mainWindow.webContents.send('diarizationHealth:change', event)
+      console.log('[Main] Forwarding diarization health change (CRITICAL):', event.status)
+      // Health changes are critical events - immediate delivery required
+      ipcEventBatcher.sendCriticalEvent('diarizationHealth:change', event)
     }
   })
 
-  // Forward recovery queued events to renderer
+  // Forward recovery queued events to renderer (HIGH PRIORITY)
   diarizationHealthMonitor.onRecoveryQueued((job) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      console.log('[Main] Forwarding recovery queued event:', job.meetingId)
-      mainWindow.webContents.send('diarizationHealth:recoveryQueued', job)
+      console.log('[Main] Forwarding recovery queued event (HIGH):', job.meetingId)
+      // Recovery events are high priority
+      ipcEventBatcher.sendHighPriorityEvent('diarizationHealth:recoveryQueued', job)
     }
   })
 
-  // Forward recovery progress events to renderer
+  // Forward recovery progress events to renderer (HIGH PRIORITY)
   diarizationFallbackService.onRecoveryProgress((progress) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('diarizationHealth:recoveryProgress', progress)
+      // Recovery progress is high priority
+      ipcEventBatcher.sendHighPriorityEvent('diarizationHealth:recoveryProgress', progress)
     }
   })
 
@@ -2587,6 +2644,137 @@ function setupTieredValidationIPC() {
     })
   }).catch(err => {
     console.error('[Main] Failed to set up tiered validation event forwarding:', err)
+  })
+}
+
+// ============================================================================
+// ML Preloader API (Background preloading of WhisperX, PyAnnote, diarization)
+// ============================================================================
+
+function setupMLPreloaderIPC() {
+  // Start background preloading of ML modules
+  ipcMain.handle('mlPreloader:startPreload', async () => {
+    console.log('[Main] mlPreloader:startPreload')
+    try {
+      const { mlPreloaderService } = await import('./services/mlPreloaderService')
+      return await mlPreloaderService.startPreload()
+    } catch (error) {
+      console.error('[Main] ML preload failed:', error)
+      return {
+        success: false,
+        modules: { whisperx: false, pyannote: false, torch: false },
+        errors: [error instanceof Error ? error.message : String(error)],
+        duration: 0
+      }
+    }
+  })
+
+  // Get current preload state
+  ipcMain.handle('mlPreloader:getState', async () => {
+    console.log('[Main] mlPreloader:getState')
+    try {
+      const { mlPreloaderService } = await import('./services/mlPreloaderService')
+      return mlPreloaderService.getState()
+    } catch (error) {
+      console.error('[Main] Failed to get preload state:', error)
+      return {
+        overall: 'idle',
+        whisperx: { name: 'whisperx', status: 'idle' },
+        pyannote: { name: 'pyannote', status: 'idle' },
+        torch: { name: 'torch', status: 'idle' }
+      }
+    }
+  })
+
+  // Check if preloading is ready
+  ipcMain.handle('mlPreloader:isReady', async () => {
+    console.log('[Main] mlPreloader:isReady')
+    try {
+      const { mlPreloaderService } = await import('./services/mlPreloaderService')
+      return mlPreloaderService.isReady()
+    } catch (error) {
+      console.error('[Main] Failed to check preload ready status:', error)
+      return false
+    }
+  })
+
+  // Preload a specific module
+  ipcMain.handle('mlPreloader:preloadModule', async (_event, moduleName: 'whisperx' | 'pyannote' | 'torch') => {
+    console.log('[Main] mlPreloader:preloadModule', { moduleName })
+    try {
+      const { mlPreloaderService } = await import('./services/mlPreloaderService')
+      return await mlPreloaderService.preloadModule(moduleName)
+    } catch (error) {
+      console.error('[Main] Failed to preload module:', error)
+      return false
+    }
+  })
+
+  // Wait for all modules to finish preloading
+  ipcMain.handle('mlPreloader:waitForAll', async (_event, timeout?: number) => {
+    console.log('[Main] mlPreloader:waitForAll', { timeout })
+    try {
+      const { mlPreloaderService } = await import('./services/mlPreloaderService')
+      return await mlPreloaderService.waitForAll(timeout)
+    } catch (error) {
+      console.error('[Main] Failed to wait for preload:', error)
+      return false
+    }
+  })
+
+  // Cancel ongoing preload operations
+  ipcMain.handle('mlPreloader:cancel', async () => {
+    console.log('[Main] mlPreloader:cancel')
+    try {
+      const { mlPreloaderService } = await import('./services/mlPreloaderService')
+      mlPreloaderService.cancelPreload()
+      return { success: true }
+    } catch (error) {
+      console.error('[Main] Failed to cancel preload:', error)
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  // Reset preload state
+  ipcMain.handle('mlPreloader:reset', async () => {
+    console.log('[Main] mlPreloader:reset')
+    try {
+      const { mlPreloaderService } = await import('./services/mlPreloaderService')
+      mlPreloaderService.reset()
+      return { success: true }
+    } catch (error) {
+      console.error('[Main] Failed to reset preload state:', error)
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  // Forward preloader events to renderer
+  import('./services/mlPreloaderService').then(({ mlPreloaderService }) => {
+    mlPreloaderService.on('preload:start', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('mlPreloader:start')
+      }
+    })
+
+    mlPreloaderService.on('preload:complete', (result) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('mlPreloader:complete', result)
+      }
+    })
+
+    mlPreloaderService.on('module:status', (data) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('mlPreloader:moduleStatus', data)
+      }
+    })
+
+    mlPreloaderService.on('preload:cancelled', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('mlPreloader:cancelled')
+      }
+    })
+  }).catch(err => {
+    console.error('[Main] Failed to set up ML preloader event forwarding:', err)
   })
 }
 

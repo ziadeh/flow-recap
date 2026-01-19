@@ -3,6 +3,9 @@
  * Main container component for displaying timestamped transcripts
  * with speaker labels, color coding, click-to-seek functionality,
  * full-text search with highlighting, and confidence indicators.
+ *
+ * Performance: Uses react-window virtualization for long transcripts
+ * to maintain smooth scrolling with thousands of segments.
  */
 
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
@@ -10,9 +13,14 @@ import { MessageSquare, Filter, AlertTriangle, Eye, EyeOff } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { TranscriptSegment } from './TranscriptSegment'
 import {
+  VirtualizedTranscriptList,
+  type VirtualizedTranscriptListRef,
+} from './VirtualizedTranscriptList'
+import {
   buildSpeakerColorIndex,
   groupTranscriptsBySpeaker,
   findActiveTranscript,
+  type TranscriptGroup,
 } from './transcript-utils'
 import {
   type ConfidenceThresholds,
@@ -20,6 +28,16 @@ import {
   getConfidenceLevel
 } from './ConfidenceIndicator'
 import type { Transcript, Speaker } from '../../types/database'
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/** Minimum number of transcript groups before virtualization kicks in */
+const VIRTUALIZATION_THRESHOLD = 30
+
+/** Default height for the virtualized list container */
+const DEFAULT_LIST_HEIGHT = 600
 
 // ============================================================================
 // Types
@@ -64,6 +82,10 @@ export interface TranscriptViewerProps {
   onConfidenceFilterChange?: (filter: ConfidenceFilterMode) => void
   /** Additional class names */
   className?: string
+  /** Height of the virtualized list container (default: 600) */
+  listHeight?: number
+  /** Whether to use virtualization (default: auto based on item count) */
+  enableVirtualization?: boolean
 }
 
 // ============================================================================
@@ -177,8 +199,11 @@ export function TranscriptViewer({
   showConfidenceFilter = false,
   onConfidenceFilterChange,
   className,
+  listHeight = DEFAULT_LIST_HEIGHT,
+  enableVirtualization,
 }: TranscriptViewerProps) {
   const activeEntryRef = useRef<HTMLDivElement>(null)
+  const virtualListRef = useRef<VirtualizedTranscriptListRef>(null)
   const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilterMode>(initialConfidenceFilter)
 
   // Handle filter change
@@ -267,29 +292,98 @@ export function TranscriptViewer({
     [searchMatchIds]
   )
 
+  // Determine if virtualization should be used
+  const shouldVirtualize = useMemo(() => {
+    if (enableVirtualization !== undefined) return enableVirtualization
+    return groupedTranscripts.length >= VIRTUALIZATION_THRESHOLD
+  }, [enableVirtualization, groupedTranscripts.length])
+
+  // Find index of the active group (for virtualized scrolling)
+  const activeGroupIndex = useMemo(() => {
+    if (!activeTranscriptId) return -1
+    return groupedTranscripts.findIndex(group =>
+      group.entries.some(entry => entry.id === activeTranscriptId)
+    )
+  }, [groupedTranscripts, activeTranscriptId])
+
+  // Find index of the current search match group (for virtualized scrolling)
+  const searchMatchGroupIndex = useMemo(() => {
+    if (!currentSearchMatchId) return -1
+    return groupedTranscripts.findIndex(group =>
+      group.entries.some(entry => entry.id === currentSearchMatchId)
+    )
+  }, [groupedTranscripts, currentSearchMatchId])
+
   // Auto-scroll to active entry when it changes (during playback)
   useEffect(() => {
-    if (autoScroll && activeEntryRef.current && activeTranscriptId && !currentSearchMatchId) {
-      activeEntryRef.current.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      })
-    }
-  }, [activeTranscriptId, autoScroll, currentSearchMatchId])
-
-  // Scroll to current search match when it changes
-  useEffect(() => {
-    if (currentSearchMatchId) {
-      // Find the element with the matching transcript ID
-      const matchElement = document.querySelector(`[data-entry-id="${currentSearchMatchId}"]`)
-      if (matchElement) {
-        matchElement.scrollIntoView({
+    if (autoScroll && activeTranscriptId && !currentSearchMatchId) {
+      if (shouldVirtualize) {
+        // Use virtualized list scrolling
+        if (activeGroupIndex >= 0) {
+          virtualListRef.current?.scrollToItem(activeGroupIndex, 'center')
+        }
+      } else if (activeEntryRef.current) {
+        // Use DOM scrolling for non-virtualized list
+        activeEntryRef.current.scrollIntoView({
           behavior: 'smooth',
           block: 'center',
         })
       }
     }
-  }, [currentSearchMatchId])
+  }, [activeTranscriptId, activeGroupIndex, autoScroll, currentSearchMatchId, shouldVirtualize])
+
+  // Scroll to current search match when it changes
+  useEffect(() => {
+    if (currentSearchMatchId) {
+      if (shouldVirtualize && searchMatchGroupIndex >= 0) {
+        // Use virtualized list scrolling
+        virtualListRef.current?.scrollToItem(searchMatchGroupIndex, 'center')
+      } else {
+        // Use DOM scrolling for non-virtualized list
+        const matchElement = document.querySelector(`[data-entry-id="${currentSearchMatchId}"]`)
+        if (matchElement) {
+          matchElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          })
+        }
+      }
+    }
+  }, [currentSearchMatchId, searchMatchGroupIndex, shouldVirtualize])
+
+  // Render a single transcript segment (used by virtualized list)
+  const renderTranscriptGroup = useCallback(
+    (group: TranscriptGroup, index: number, _isScrolling: boolean) => (
+      <TranscriptSegment
+        key={`group-${index}-${group.entries[0]?.id}`}
+        group={group}
+        activeTranscriptId={activeTranscriptId}
+        onSeekAudio={onSeekAudio}
+        activeEntryRef={!shouldVirtualize ? activeEntryRef : undefined}
+        searchQuery={searchQuery}
+        searchMatchIds={searchMatchIdsSet}
+        currentSearchMatchId={currentSearchMatchId}
+        showConfidence={showConfidence}
+        confidenceMode={confidenceMode}
+        confidenceThresholds={confidenceThresholds}
+        adjustedConfidenceIds={adjustedConfidenceIds}
+        onAdjustConfidence={onAdjustConfidence}
+      />
+    ),
+    [
+      activeTranscriptId,
+      onSeekAudio,
+      searchQuery,
+      searchMatchIdsSet,
+      currentSearchMatchId,
+      showConfidence,
+      confidenceMode,
+      confidenceThresholds,
+      adjustedConfidenceIds,
+      onAdjustConfidence,
+      shouldVirtualize,
+    ]
+  )
 
   // Empty state
   if (transcripts.length === 0) {
@@ -339,30 +433,55 @@ export function TranscriptViewer({
           counts={confidenceCounts}
         />
       )}
-      <div
-        className="py-4 space-y-6"
-        data-testid="transcript-viewer"
-        role="region"
-        aria-label="Meeting transcript"
-      >
-        {groupedTranscripts.map((group, groupIndex) => (
-          <TranscriptSegment
-            key={`group-${groupIndex}-${group.entries[0]?.id}`}
-            group={group}
-            activeTranscriptId={activeTranscriptId}
-            onSeekAudio={onSeekAudio}
-            activeEntryRef={activeEntryRef}
-            searchQuery={searchQuery}
-            searchMatchIds={searchMatchIdsSet}
-            currentSearchMatchId={currentSearchMatchId}
-            showConfidence={showConfidence}
-            confidenceMode={confidenceMode}
-            confidenceThresholds={confidenceThresholds}
-            adjustedConfidenceIds={adjustedConfidenceIds}
-            onAdjustConfidence={onAdjustConfidence}
+
+      {shouldVirtualize ? (
+        /* Virtualized rendering for long transcripts */
+        <div
+          data-testid="transcript-viewer"
+          data-virtualized="true"
+          role="region"
+          aria-label="Meeting transcript (virtualized)"
+        >
+          <VirtualizedTranscriptList
+            ref={virtualListRef}
+            items={groupedTranscripts}
+            height={listHeight}
+            renderItem={renderTranscriptGroup}
+            estimatedItemHeight={120}
+            overscanCount={3}
+            virtualizationThreshold={VIRTUALIZATION_THRESHOLD}
+            getItemKey={(group, index) => `group-${index}-${group.entries[0]?.id}`}
+            className="py-4"
           />
-        ))}
-      </div>
+        </div>
+      ) : (
+        /* Standard rendering for short transcripts */
+        <div
+          className="py-4 space-y-6"
+          data-testid="transcript-viewer"
+          data-virtualized="false"
+          role="region"
+          aria-label="Meeting transcript"
+        >
+          {groupedTranscripts.map((group, groupIndex) => (
+            <TranscriptSegment
+              key={`group-${groupIndex}-${group.entries[0]?.id}`}
+              group={group}
+              activeTranscriptId={activeTranscriptId}
+              onSeekAudio={onSeekAudio}
+              activeEntryRef={activeEntryRef}
+              searchQuery={searchQuery}
+              searchMatchIds={searchMatchIdsSet}
+              currentSearchMatchId={currentSearchMatchId}
+              showConfidence={showConfidence}
+              confidenceMode={confidenceMode}
+              confidenceThresholds={confidenceThresholds}
+              adjustedConfidenceIds={adjustedConfidenceIds}
+              onAdjustConfidence={onAdjustConfidence}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

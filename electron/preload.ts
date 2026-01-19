@@ -75,6 +75,11 @@ import type {
   SpeakerStats as StreamingSpeakerStats,
   RetroactiveCorrectionEvent
 } from './services/streamingDiarizationService'
+import type {
+  BatchedLiveTranscriptionUpdate,
+  BatchedStreamingDiarizationUpdate,
+  BatchedLiveNotesUpdate
+} from './services/ipcEventBatcher'
 
 // ============================================================================
 // Database API
@@ -799,6 +804,19 @@ const liveTranscriptionAPI = {
     return () => {
       ipcRenderer.removeListener('liveTranscription:diarizationStatus', handler)
     }
+  },
+
+  // Subscribe to batched updates (consolidated every 500ms for better performance)
+  // RECOMMENDED: Use this instead of individual onProgress/onSegment handlers
+  // to prevent UI stuttering during live recording sessions
+  onBatchedUpdate: (callback: (update: BatchedLiveTranscriptionUpdate) => void): (() => void) => {
+    const handler = (_event: unknown, update: BatchedLiveTranscriptionUpdate) => {
+      callback(update)
+    }
+    ipcRenderer.on('liveTranscription:batchedUpdate', handler)
+    return () => {
+      ipcRenderer.removeListener('liveTranscription:batchedUpdate', handler)
+    }
   }
 }
 
@@ -996,6 +1014,19 @@ const streamingDiarizationAPI = {
     ipcRenderer.on('streamingDiarization:stats', handler)
     return () => {
       ipcRenderer.removeListener('streamingDiarization:stats', handler)
+    }
+  },
+
+  // Subscribe to batched updates (consolidated every 500ms for better performance)
+  // RECOMMENDED: Use this instead of individual onSpeakerSegment/onSpeakerChange/onStats handlers
+  // to prevent UI stuttering during live recording sessions
+  onBatchedUpdate: (callback: (update: BatchedStreamingDiarizationUpdate) => void): (() => void) => {
+    const handler = (_event: unknown, update: BatchedStreamingDiarizationUpdate) => {
+      callback(update)
+    }
+    ipcRenderer.on('streamingDiarization:batchedUpdate', handler)
+    return () => {
+      ipcRenderer.removeListener('streamingDiarization:batchedUpdate', handler)
     }
   }
 }
@@ -1605,6 +1636,99 @@ const tieredValidationAPI = {
     const handler = (_event: unknown, data: { validationLevel: ValidationLevel }) => callback(data)
     ipcRenderer.on('tieredValidation:settingsChanged', handler)
     return () => ipcRenderer.removeListener('tieredValidation:settingsChanged', handler)
+  }
+}
+
+// ============================================================================
+// ML Preloader API (Background preloading of WhisperX, PyAnnote, diarization)
+// ============================================================================
+
+export type PreloadStatus = 'idle' | 'preloading' | 'ready' | 'partial' | 'failed'
+
+export interface PreloadModuleStatus {
+  name: string
+  status: 'idle' | 'loading' | 'ready' | 'failed'
+  duration?: number
+  error?: string
+  lastPreloaded?: string
+}
+
+export interface PreloadState {
+  overall: PreloadStatus
+  whisperx: PreloadModuleStatus
+  pyannote: PreloadModuleStatus
+  torch: PreloadModuleStatus
+  startTime?: number
+  endTime?: number
+  totalDuration?: number
+}
+
+export interface PreloadResult {
+  success: boolean
+  modules: {
+    whisperx: boolean
+    pyannote: boolean
+    torch: boolean
+  }
+  errors: string[]
+  duration: number
+}
+
+const mlPreloaderAPI = {
+  // Start background preloading of ML modules
+  startPreload: (): Promise<PreloadResult> =>
+    ipcRenderer.invoke('mlPreloader:startPreload'),
+
+  // Get current preload state
+  getState: (): Promise<PreloadState> =>
+    ipcRenderer.invoke('mlPreloader:getState'),
+
+  // Check if preloading is ready
+  isReady: (): Promise<boolean> =>
+    ipcRenderer.invoke('mlPreloader:isReady'),
+
+  // Preload a specific module
+  preloadModule: (moduleName: 'whisperx' | 'pyannote' | 'torch'): Promise<boolean> =>
+    ipcRenderer.invoke('mlPreloader:preloadModule', moduleName),
+
+  // Wait for all modules to finish preloading
+  waitForAll: (timeout?: number): Promise<boolean> =>
+    ipcRenderer.invoke('mlPreloader:waitForAll', timeout),
+
+  // Cancel ongoing preload operations
+  cancel: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('mlPreloader:cancel'),
+
+  // Reset preload state
+  reset: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('mlPreloader:reset'),
+
+  // Subscribe to preload start events
+  onStart: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('mlPreloader:start', handler)
+    return () => ipcRenderer.removeListener('mlPreloader:start', handler)
+  },
+
+  // Subscribe to preload complete events
+  onComplete: (callback: (result: PreloadResult) => void): (() => void) => {
+    const handler = (_event: unknown, result: PreloadResult) => callback(result)
+    ipcRenderer.on('mlPreloader:complete', handler)
+    return () => ipcRenderer.removeListener('mlPreloader:complete', handler)
+  },
+
+  // Subscribe to module status updates
+  onModuleStatus: (callback: (data: PreloadModuleStatus & { moduleName: string }) => void): (() => void) => {
+    const handler = (_event: unknown, data: PreloadModuleStatus & { moduleName: string }) => callback(data)
+    ipcRenderer.on('mlPreloader:moduleStatus', handler)
+    return () => ipcRenderer.removeListener('mlPreloader:moduleStatus', handler)
+  },
+
+  // Subscribe to preload cancelled events
+  onCancelled: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('mlPreloader:cancelled', handler)
+    return () => ipcRenderer.removeListener('mlPreloader:cancelled', handler)
   }
 }
 
@@ -3182,6 +3306,19 @@ const liveNotesAPI = {
     ipcRenderer.on('liveNotes:saveProgress', handler)
     return () => {
       ipcRenderer.removeListener('liveNotes:saveProgress', handler)
+    }
+  },
+
+  // Subscribe to batched updates (consolidated every 500ms for better performance)
+  // RECOMMENDED: Use this instead of individual onNotes/onStatus/onBatchState/onError handlers
+  // to prevent UI stuttering during live recording sessions
+  onBatchedUpdate: (callback: (update: BatchedLiveNotesUpdate) => void): (() => void) => {
+    const handler = (_event: unknown, update: BatchedLiveNotesUpdate) => {
+      callback(update)
+    }
+    ipcRenderer.on('liveNotes:batchedUpdate', handler)
+    return () => {
+      ipcRenderer.removeListener('liveNotes:batchedUpdate', handler)
     }
   }
 }
@@ -4767,6 +4904,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Tiered Validation API (Progressive Startup Validation)
   tieredValidation: tieredValidationAPI,
 
+  // ML Preloader API (Background preloading of WhisperX, PyAnnote, diarization)
+  mlPreloader: mlPreloaderAPI,
+
   // Python Setup API (Automated Environment Creation)
   pythonSetup: pythonSetupAPI,
 
@@ -4871,6 +5011,7 @@ declare global {
       diarizationHealth: typeof diarizationHealthAPI
       pythonValidation: typeof pythonValidationAPI
       tieredValidation: typeof tieredValidationAPI
+      mlPreloader: typeof mlPreloaderAPI
       pythonSetup: typeof pythonSetupAPI
       pythonEnv: typeof pythonExecutionManagerAPI
       modelManager: typeof modelManagerAPI

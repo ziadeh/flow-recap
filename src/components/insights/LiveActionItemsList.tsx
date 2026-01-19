@@ -12,7 +12,7 @@
  * - Empty state messaging
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo, memo } from 'react'
 import {
   CheckCircle2,
   Circle,
@@ -65,7 +65,11 @@ interface ActionItemCardProps {
   onClick?: (item: LiveNoteItem) => void
 }
 
-function ActionItemCard({ item, isNew, showConfidence, onClick }: ActionItemCardProps) {
+/**
+ * Action item card component
+ * Memoized to prevent re-renders when item hasn't changed
+ */
+const ActionItemCard = memo(function ActionItemCard({ item, isNew, showConfidence, onClick }: ActionItemCardProps) {
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString([], {
       hour: '2-digit',
@@ -164,13 +168,18 @@ function ActionItemCard({ item, isNew, showConfidence, onClick }: ActionItemCard
       </div>
     </div>
   )
-}
+})
 
 // ============================================================================
 // Main Component
 // ============================================================================
 
-export function LiveActionItemsList({
+/**
+ * LiveActionItemsList Component
+ * Displays action items as they're detected during live recording
+ * Memoized to prevent re-renders when props haven't changed
+ */
+export const LiveActionItemsList = memo(function LiveActionItemsList({
   actionItems,
   isProcessing = false,
   showConfidence = true,
@@ -218,10 +227,12 @@ export function LiveActionItemsList({
     }
   }, [actionItems.length, enableAutoScroll])
 
-  // Calculate last update time
-  const lastUpdateTime = actionItems.length > 0
-    ? Math.max(...actionItems.map((item) => item.extractedAt))
-    : null
+  // Memoize last update time calculation
+  const lastUpdateTime = useMemo(() => {
+    return actionItems.length > 0
+      ? Math.max(...actionItems.map((item) => item.extractedAt))
+      : null
+  }, [actionItems])
 
   const getLastUpdatedText = () => {
     if (!lastUpdateTime) return 'Never'
@@ -283,6 +294,6 @@ export function LiveActionItemsList({
       )}
     </div>
   )
-}
+})
 
 export default LiveActionItemsList

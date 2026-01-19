@@ -219,6 +219,23 @@ export function useRecording() {
           }
         }
 
+        // Ensure ML modules are preloaded before starting recording
+        // This is a just-in-time check - if preloading already completed in background, this returns immediately
+        // If not, it triggers preloading and continues (non-blocking for the recording itself)
+        const mlPreloader = (window.electronAPI as any)?.mlPreloader
+        if (mlPreloader) {
+          mlPreloader.isReady().then((isReady: boolean) => {
+            if (!isReady) {
+              console.log('[Recording] ML modules not preloaded yet, triggering just-in-time preload')
+              mlPreloader.startPreload().catch((err: Error) => {
+                console.warn('[Recording] Just-in-time ML preload error (non-critical):', err)
+              })
+            }
+          }).catch(() => {
+            // Ignore errors - preloading is best-effort
+          })
+        }
+
         const result = await window.electronAPI.recording.start(meetingIdParam) as ExtendedStartRecordingResult
         if (result.success) {
           updateState({

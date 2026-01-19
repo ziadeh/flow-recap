@@ -18,7 +18,7 @@ import appIcon from '../../resources/FlowRecap-sign.png'
 import { useNewMeeting } from '@/hooks/useNewMeeting'
 import { NewMeetingModal } from './NewMeetingModal'
 import { RecordingIndicator } from './RecordingIndicator'
-import { useRecordingStore } from '@/stores/recording-store'
+import { useRecordingStatus } from '@/stores/recording-store'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal'
 import { useKeyboardShortcutsStore } from '@/stores'
@@ -361,7 +361,7 @@ function NavItem({ icon, label, active, collapsed, shortcut, badge, onClick }: N
 function Header() {
   const location = useLocation()
   const { isModalOpen, openModal, closeModal, handleSuccess } = useNewMeeting()
-  const { status } = useRecordingStore()
+  const status = useRecordingStatus()
 
   // Check if actively recording (recording or paused)
   const isRecording = status === 'recording' || status === 'paused'

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo, memo } from 'react'
 import {
   Hash,
   Clock,
@@ -106,8 +106,9 @@ function SentimentBadge({ sentiment, size = 'sm' }: { sentiment: SentimentType; 
 
 /**
  * Expandable topic card
+ * Memoized to prevent re-renders when topic hasn't changed
  */
-function TopicCard({
+const TopicCard = memo(function TopicCard({
   topic,
   meetingDurationMs,
   defaultExpanded,
@@ -265,14 +266,18 @@ function TopicCard({
       )}
     </div>
   )
-}
+})
 
 /**
  * Topics overview/timeline visualization
+ * Memoized to prevent re-renders when topics haven't changed
  */
-function TopicsTimeline({ topics, meetingDurationMs }: { topics: ExtractedTopic[]; meetingDurationMs: number }) {
-  // Sort topics by start time
-  const sortedTopics = [...topics].sort((a, b) => a.startTimeMs - b.startTimeMs)
+const TopicsTimeline = memo(function TopicsTimeline({ topics, meetingDurationMs }: { topics: ExtractedTopic[]; meetingDurationMs: number }) {
+  // Memoize sorted topics to avoid re-sorting on every render
+  const sortedTopics = useMemo(() =>
+    [...topics].sort((a, b) => a.startTimeMs - b.startTimeMs),
+    [topics]
+  )
 
   return (
     <div className="mb-6">
@@ -310,13 +315,14 @@ function TopicsTimeline({ topics, meetingDurationMs }: { topics: ExtractedTopic[
       </div>
     </div>
   )
-}
+})
 
 /**
  * TopicsList Component
  * Displays extracted topics with duration, sentiment, key points, and decisions
+ * Memoized to prevent re-renders when props haven't changed
  */
-export function TopicsList({
+export const TopicsList = memo(function TopicsList({
   topics,
   meetingDurationMs,
   defaultExpanded = false,
@@ -335,19 +341,26 @@ export function TopicsList({
     )
   }
 
-  // Sort topics by start time
-  const sortedTopics = [...topics].sort((a, b) => a.startTimeMs - b.startTimeMs)
+  // Memoize sorted topics to avoid re-sorting on every render
+  const sortedTopics = useMemo(() =>
+    [...topics].sort((a, b) => a.startTimeMs - b.startTimeMs),
+    [topics]
+  )
 
-  // Calculate stats
-  const totalKeyPoints = topics.reduce((sum, t) => sum + t.keyPoints.length, 0)
-  const totalDecisions = topics.reduce((sum, t) => sum + t.decisions.length, 0)
-  const uniqueSpeakers = new Set(topics.flatMap(t => t.speakers)).size
+  // Memoize stats calculation to prevent recalculating on every render
+  const stats = useMemo(() => ({
+    totalKeyPoints: topics.reduce((sum, t) => sum + t.keyPoints.length, 0),
+    totalDecisions: topics.reduce((sum, t) => sum + t.decisions.length, 0),
+    uniqueSpeakers: new Set(topics.flatMap(t => t.speakers)).size
+  }), [topics])
 
-  // Sentiment breakdown
-  const sentimentCounts = topics.reduce((acc, topic) => {
-    acc[topic.sentiment] = (acc[topic.sentiment] || 0) + 1
-    return acc
-  }, {} as Record<SentimentType, number>)
+  // Memoize sentiment breakdown calculation
+  const sentimentCounts = useMemo(() => {
+    return topics.reduce((acc, topic) => {
+      acc[topic.sentiment] = (acc[topic.sentiment] || 0) + 1
+      return acc
+    }, {} as Record<SentimentType, number>)
+  }, [topics])
 
   return (
     <div className="py-4">
@@ -360,18 +373,18 @@ export function TopicsList({
         </div>
         <div className="flex items-center gap-2 px-3 py-2 bg-yellow-50 rounded-lg">
           <Lightbulb className="w-4 h-4 text-yellow-600" />
-          <span className="text-sm font-medium text-yellow-700">{totalKeyPoints}</span>
-          <span className="text-sm text-yellow-600">Key Point{totalKeyPoints !== 1 ? 's' : ''}</span>
+          <span className="text-sm font-medium text-yellow-700">{stats.totalKeyPoints}</span>
+          <span className="text-sm text-yellow-600">Key Point{stats.totalKeyPoints !== 1 ? 's' : ''}</span>
         </div>
         <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-lg">
           <Gavel className="w-4 h-4 text-blue-600" />
-          <span className="text-sm font-medium text-blue-700">{totalDecisions}</span>
-          <span className="text-sm text-blue-600">Decision{totalDecisions !== 1 ? 's' : ''}</span>
+          <span className="text-sm font-medium text-blue-700">{stats.totalDecisions}</span>
+          <span className="text-sm text-blue-600">Decision{stats.totalDecisions !== 1 ? 's' : ''}</span>
         </div>
         <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg">
           <Users className="w-4 h-4 text-muted-foreground" />
-          <span className="text-sm font-medium text-foreground">{uniqueSpeakers}</span>
-          <span className="text-sm text-muted-foreground">Speaker{uniqueSpeakers !== 1 ? 's' : ''}</span>
+          <span className="text-sm font-medium text-foreground">{stats.uniqueSpeakers}</span>
+          <span className="text-sm text-muted-foreground">Speaker{stats.uniqueSpeakers !== 1 ? 's' : ''}</span>
         </div>
       </div>
 
@@ -407,6 +420,6 @@ export function TopicsList({
       </div>
     </div>
   )
-}
+})
 
 export default TopicsList

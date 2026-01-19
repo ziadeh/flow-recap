@@ -12,7 +12,7 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useRecordingStore } from '@/stores/recording-store'
-import { useLiveTranscriptStore, LiveTranscriptSegment } from '@/stores/live-transcript-store'
+import { useLiveTranscriptStatus, useLiveTranscriptSegments, useLiveTranscriptActions, LiveTranscriptSegment } from '@/stores/live-transcript-store'
 import { useLiveNotesStore } from '@/stores/live-notes-store'
 
 // Progress type (mirrors LiveTranscriptionProgress from electron services)
@@ -53,9 +53,10 @@ export function LiveTranscriptionProvider({ children }: LiveTranscriptionProvide
   const recordingMeetingId = useRecordingStore((state) => state.meetingId)
   const audioFilePath = useRecordingStore((state) => state.audioFilePath)
 
-  // Live transcript store actions
+  // Live transcript store actions - use composite hook for performance
+  const liveStatus = useLiveTranscriptStatus()
+  const liveSegments = useLiveTranscriptSegments()
   const {
-    status: liveStatus,
     startSession,
     stopSession,
     pauseSession,
@@ -66,8 +67,7 @@ export function LiveTranscriptionProvider({ children }: LiveTranscriptionProvide
     setProgress,
     saveToDatabase,
     reset,
-    segments: liveSegments,
-  } = useLiveTranscriptStore()
+  } = useLiveTranscriptActions()
 
   // Live notes store actions
   const liveNotesStore = useLiveNotesStore()

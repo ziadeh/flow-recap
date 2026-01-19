@@ -12,7 +12,7 @@
  * - Empty state messaging
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo, memo } from 'react'
 import {
   Gavel,
   Users,
@@ -78,7 +78,11 @@ interface DecisionCardProps {
   onClick?: (item: LiveNoteItem) => void
 }
 
-function DecisionCard({ item, isNew, showConfidence, onClick }: DecisionCardProps) {
+/**
+ * Decision card component
+ * Memoized to prevent re-renders when item hasn't changed
+ */
+const DecisionCard = memo(function DecisionCard({ item, isNew, showConfidence, onClick }: DecisionCardProps) {
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString([], {
       hour: '2-digit',
@@ -191,13 +195,18 @@ function DecisionCard({ item, isNew, showConfidence, onClick }: DecisionCardProp
       </div>
     </div>
   )
-}
+})
 
 // ============================================================================
 // Main Component
 // ============================================================================
 
-export function LiveDecisionsList({
+/**
+ * LiveDecisionsList Component
+ * Displays decisions detected during live recording
+ * Memoized to prevent re-renders when props haven't changed
+ */
+export const LiveDecisionsList = memo(function LiveDecisionsList({
   decisions,
   isProcessing = false,
   showConfidence = true,
@@ -245,10 +254,12 @@ export function LiveDecisionsList({
     }
   }, [decisions.length, enableAutoScroll])
 
-  // Calculate last update time
-  const lastUpdateTime = decisions.length > 0
-    ? Math.max(...decisions.map((item) => item.extractedAt))
-    : null
+  // Memoize last update time calculation
+  const lastUpdateTime = useMemo(() => {
+    return decisions.length > 0
+      ? Math.max(...decisions.map((item) => item.extractedAt))
+      : null
+  }, [decisions])
 
   const getLastUpdatedText = () => {
     if (!lastUpdateTime) return 'Never'
@@ -310,6 +321,6 @@ export function LiveDecisionsList({
       )}
     </div>
   )
-}
+})
 
 export default LiveDecisionsList

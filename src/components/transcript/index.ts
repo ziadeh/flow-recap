@@ -29,6 +29,12 @@ export type { IndividualSpeakerBoxViewerProps } from './IndividualSpeakerBoxView
 export { ChatStyleTranscriptViewer } from './ChatStyleTranscriptViewer'
 export type { ChatStyleTranscriptViewerProps } from './ChatStyleTranscriptViewer'
 
+// Infinite Scroll Components
+export { InfiniteScrollTranscriptList } from './InfiniteScrollTranscriptList'
+export type { InfiniteScrollTranscriptListProps, InfiniteScrollTranscriptListRef } from './InfiniteScrollTranscriptList'
+export { useInfiniteTranscript } from './useInfiniteTranscript'
+export type { UseInfiniteTranscriptOptions, UseInfiniteTranscriptResult } from './useInfiniteTranscript'
+
 // Collapsible Transcript Section
 export { CollapsibleTranscriptSection } from './CollapsibleTranscriptSection'
 export type { CollapsibleTranscriptSectionProps, SortOption } from './CollapsibleTranscriptSection'
