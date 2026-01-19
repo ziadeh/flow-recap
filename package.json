@@ -11,7 +11,6 @@
     "preview": "vite preview",
     "electron:dev": "vite",
     "pack": "npm run build:vite && electron-builder --dir --config electron-builder.config.cjs",
-
     "build:mac": "npm run build:vite && electron-builder --mac --config electron-builder.config.cjs",
     "build:mac:x64": "npm run build:vite && electron-builder --mac --x64 --config electron-builder.config.cjs",
     "build:mac:arm64": "npm run build:vite && electron-builder --mac --arm64 --config electron-builder.config.cjs",
@@ -22,7 +21,6 @@
     "build:win:ci": "npm run build:vite && electron-builder --win --x64 -c.win.target=nsis -c.win.target=zip --config electron-builder.config.cjs",
     "build:linux": "npm run build:vite && electron-builder --linux --config electron-builder.config.cjs",
     "build:all": "npm run build:vite && electron-builder --mac --win --linux --config electron-builder.config.cjs",
-
     "dist": "npm run build:vite && electron-builder --config electron-builder.config.cjs",
     "dist:mac": "npm run build:vite && electron-builder --mac --config electron-builder.config.cjs",
     "dist:mac:x64": "npm run build:vite && electron-builder --mac --x64 --config electron-builder.config.cjs",
@@ -42,10 +40,20 @@
     "download-binaries": "node scripts/download-binaries.js",
     "download-binaries:sox": "node scripts/download-binaries.js --sox-only",
     "download-binaries:ffmpeg": "node scripts/download-binaries.js --ffmpeg-only",
+    "migrate-docs": "node scripts/migrate-docs.js",
+    "migrate-docs:dry-run": "node scripts/migrate-docs.js --dry-run",
+    "prepare-hooks": "cp scripts/git-hooks/* .git/hooks/ 2>/dev/null || node scripts/install-hooks.js",
+    "check-root-md": "node scripts/check-root-md-files.js",
+    "validate-docs": "node scripts/validate-docs.js",
+    "validate-docs:ci": "node scripts/validate-docs.js --ci",
+    "validate-docs:verbose": "node scripts/validate-docs.js --verbose",
     "bundle:python:verify": "node scripts/bundle-python.js --verify",
     "bundle:python:models": "node scripts/bundle-python.js --include-models",
     "typecheck": "tsc --noEmit",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "test": "npx playwright test",
     "test:diarization": "npx playwright test tests/diarization/",
     "test:diarization:acceptance": "npx playwright test tests/diarization/acceptance.spec.ts",
@@ -61,7 +69,8 @@
     "test:production:platform": "npx playwright test tests/production/platform-specific.spec.ts",
     "test:production:performance": "npx playwright test tests/production/performance.spec.ts",
     "test:production:all": "npx playwright test tests/production/ --reporter=html",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "prepare": "husky"
   },
   "keywords": [
     "electron",
@@ -87,6 +96,7 @@
     "autoprefixer": "^10.4.23",
     "electron": "^29.0.0",
     "electron-builder": "^24.13.3",
+    "husky": "^9.1.7",
     "playwright": "^1.57.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.19",
@@ -95,7 +105,8 @@
     "typescript": "^5.3.3",
     "vite": "^5.1.0",
     "vite-plugin-electron": "^0.28.4",
-    "vite-plugin-electron-renderer": "^0.14.5"
+    "vite-plugin-electron-renderer": "^0.14.5",
+    "vitepress": "^1.6.4"
   },
   "dependencies": {
     "@types/archiver": "^6.0.3",

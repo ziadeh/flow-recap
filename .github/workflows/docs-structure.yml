@@ -1,0 +1,456 @@
+name: Documentation Structure Validation
+
+on:
+  pull_request:
+    paths:
+      - '*.md'
+      - 'docs/**/*.md'
+      - 'scripts/validate-docs*.js'
+      - '.github/workflows/docs-structure.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - '*.md'
+      - 'docs/**/*.md'
+
+jobs:
+  validate-docs:
+    name: Validate Documentation Structure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for comparing with base branch
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install validation dependencies
+        run: npm install markdown-link-check gray-matter glob
+
+      - name: Check for unauthorized .md files in root
+        id: root-check
+        run: |
+          echo "## Root Directory Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Define allowed .md files in root
+          ALLOWED_FILES="README.md CHANGELOG.md CONTRIBUTING.md LICENSE.md"
+
+          # Get all .md files in root directory
+          ROOT_MD_FILES=$(find . -maxdepth 1 -name "*.md" -type f | sed 's|^\./||')
+
+          # Track violations
+          VIOLATIONS=""
+
+          for file in $ROOT_MD_FILES; do
+            if ! echo "$ALLOWED_FILES" | grep -qw "$file"; then
+              VIOLATIONS="${VIOLATIONS}${file}\n"
+              echo "::error file=$file::Unauthorized .md file in root directory: $file. Move to docs/ subdirectory."
+            else
+              echo "✓ $file (allowed in root)" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          if [ -n "$VIOLATIONS" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ Unauthorized Files Found" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo -e "$VIOLATIONS" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Action Required:** Move these files to the appropriate docs/ subdirectory:" >> $GITHUB_STEP_SUMMARY
+            echo "- \`docs/setup/\` - Installation & build guides" >> $GITHUB_STEP_SUMMARY
+            echo "- \`docs/features/\` - Feature documentation" >> $GITHUB_STEP_SUMMARY
+            echo "- \`docs/troubleshooting/\` - Bug fixes & FAQs" >> $GITHUB_STEP_SUMMARY
+            echo "- \`docs/development/\` - Architecture & testing" >> $GITHUB_STEP_SUMMARY
+            echo "- \`docs/api/\` - API documentation" >> $GITHUB_STEP_SUMMARY
+            echo "has_violations=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All root .md files are approved" >> $GITHUB_STEP_SUMMARY
+          echo "has_violations=false" >> $GITHUB_OUTPUT
+
+      - name: Validate .md files are in docs/ subdirectories
+        id: structure-check
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Documentation Location Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Find .md files directly in docs/ (not in subdirectories)
+          # Allowed files in docs/: index.md, guide-map.md, README.md
+          ALLOWED_DOCS_ROOT="index.md guide-map.md README.md"
+
+          DOCS_ROOT_FILES=$(find docs -maxdepth 1 -name "*.md" -type f 2>/dev/null | sed 's|docs/||' || echo "")
+
+          VIOLATIONS=""
+
+          for file in $DOCS_ROOT_FILES; do
+            if ! echo "$ALLOWED_DOCS_ROOT" | grep -qw "$file"; then
+              VIOLATIONS="${VIOLATIONS}docs/${file}\n"
+              echo "::error file=docs/$file::File should be in a docs/ subdirectory (setup, features, troubleshooting, development, or api)"
+            fi
+          done
+
+          if [ -n "$VIOLATIONS" ]; then
+            echo "### ❌ Files in Wrong Location" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The following files should be in a docs/ subdirectory:" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo -e "$VIOLATIONS" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "has_violations=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "✅ All documentation files are in appropriate subdirectories" >> $GITHUB_STEP_SUMMARY
+          echo "has_violations=false" >> $GITHUB_OUTPUT
+
+      - name: Validate naming conventions (kebab-case or UPPER_SNAKE_CASE)
+        id: naming-check
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Naming Convention Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          VIOLATIONS=""
+
+          # Check all .md files in docs/
+          while IFS= read -r file; do
+            filename=$(basename "$file" .md)
+
+            # Skip index files
+            if [ "$filename" = "index" ] || [ "$filename" = "README" ] || [ "$filename" = "guide-map" ]; then
+              continue
+            fi
+
+            # Check for valid naming: kebab-case or UPPER_SNAKE_CASE
+            # kebab-case: lowercase letters, numbers, and hyphens
+            # UPPER_SNAKE_CASE: uppercase letters, numbers, and underscores
+            if ! echo "$filename" | grep -qE '^[a-z0-9]+(-[a-z0-9]+)*$|^[A-Z0-9]+(_[A-Z0-9]+)*$'; then
+              VIOLATIONS="${VIOLATIONS}${file}: '${filename}' should be kebab-case (my-doc) or UPPER_SNAKE_CASE (MY_DOC)\n"
+              echo "::error file=$file::Invalid naming: '$filename' - Use kebab-case (my-doc.md) or UPPER_SNAKE_CASE (MY_DOC.md)"
+            fi
+
+            # Check for spaces in filename
+            if echo "$file" | grep -q ' '; then
+              VIOLATIONS="${VIOLATIONS}${file}: Filename contains spaces\n"
+              echo "::error file=$file::Filename contains spaces. Use hyphens or underscores instead."
+            fi
+          done < <(find docs -name "*.md" -type f)
+
+          if [ -n "$VIOLATIONS" ]; then
+            echo "### ❌ Naming Convention Violations" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo -e "$VIOLATIONS" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Accepted naming conventions:**" >> $GITHUB_STEP_SUMMARY
+            echo "- \`kebab-case.md\` (e.g., \`my-feature-doc.md\`)" >> $GITHUB_STEP_SUMMARY
+            echo "- \`UPPER_SNAKE_CASE.md\` (e.g., \`MY_FEATURE_DOC.md\`)" >> $GITHUB_STEP_SUMMARY
+            echo "has_violations=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "✅ All documentation files follow naming conventions" >> $GITHUB_STEP_SUMMARY
+          echo "has_violations=false" >> $GITHUB_OUTPUT
+
+      - name: Validate frontmatter presence
+        id: frontmatter-check
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Frontmatter Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          node << 'EOF'
+          const fs = require('fs');
+          const path = require('path');
+          const matter = require('gray-matter');
+          const glob = require('glob');
+
+          const files = glob.sync('docs/**/*.md');
+          const violations = [];
+          const warnings = [];
+
+          // Files that don't require frontmatter
+          const exemptFiles = ['docs/api/index.md', 'docs/examples/index.md'];
+
+          for (const file of files) {
+            // Skip VitePress config files
+            if (file.includes('.vitepress')) continue;
+
+            // Skip exempt files
+            if (exemptFiles.some(exempt => file.endsWith(exempt.replace('docs/', '')))) continue;
+
+            const content = fs.readFileSync(file, 'utf-8');
+
+            try {
+              const { data: frontmatter, content: body } = matter(content);
+
+              // Check if frontmatter exists
+              if (!content.startsWith('---')) {
+                violations.push(`${file}: Missing frontmatter`);
+                continue;
+              }
+
+              // Check required fields
+              if (!frontmatter.title) {
+                violations.push(`${file}: Missing 'title' in frontmatter`);
+              }
+
+              if (!frontmatter.description) {
+                warnings.push(`${file}: Consider adding 'description' in frontmatter for SEO`);
+              }
+
+              // Validate title is not empty
+              if (frontmatter.title && frontmatter.title.trim() === '') {
+                violations.push(`${file}: 'title' is empty`);
+              }
+
+            } catch (err) {
+              violations.push(`${file}: Invalid frontmatter format - ${err.message}`);
+            }
+          }
+
+          // Output to step summary
+          const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+
+          if (violations.length > 0) {
+            fs.appendFileSync(summaryFile, '### ❌ Frontmatter Errors\n\n');
+            fs.appendFileSync(summaryFile, '```\n');
+            violations.forEach(v => fs.appendFileSync(summaryFile, v + '\n'));
+            fs.appendFileSync(summaryFile, '```\n\n');
+            fs.appendFileSync(summaryFile, '**Required frontmatter format:**\n');
+            fs.appendFileSync(summaryFile, '```yaml\n---\ntitle: Document Title\ndescription: Brief description of the document\n---\n```\n\n');
+
+            // Also output to console for error annotations
+            violations.forEach(v => {
+              const [file] = v.split(':');
+              console.log(`::error file=${file}::${v}`);
+            });
+          }
+
+          if (warnings.length > 0) {
+            fs.appendFileSync(summaryFile, '### ⚠️ Frontmatter Warnings\n\n');
+            warnings.forEach(w => {
+              fs.appendFileSync(summaryFile, `- ${w}\n`);
+              const [file] = w.split(':');
+              console.log(`::warning file=${file}::${w}`);
+            });
+            fs.appendFileSync(summaryFile, '\n');
+          }
+
+          if (violations.length === 0 && warnings.length === 0) {
+            fs.appendFileSync(summaryFile, '✅ All documentation has valid frontmatter\n\n');
+          } else if (violations.length === 0) {
+            fs.appendFileSync(summaryFile, '✅ All documentation has required frontmatter (with some recommendations)\n\n');
+          }
+
+          process.exit(violations.length > 0 ? 1 : 0);
+          EOF
+
+      - name: Check for broken internal links
+        id: link-check
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Internal Link Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Create markdown-link-check config
+          cat > .mlc-config.json << 'EOF'
+          {
+            "ignorePatterns": [
+              { "pattern": "^https?://" },
+              { "pattern": "^mailto:" },
+              { "pattern": "^#" }
+            ],
+            "replacementPatterns": [
+              { "pattern": "^/", "replacement": "docs/" }
+            ],
+            "aliveStatusCodes": [200, 206, 301, 302, 307, 308]
+          }
+          EOF
+
+          VIOLATIONS=""
+
+          # Check internal links in all docs
+          while IFS= read -r file; do
+            # Extract internal links (relative paths)
+            INTERNAL_LINKS=$(grep -oE '\[([^\]]+)\]\(([^)]+)\)' "$file" | grep -oE '\([^)]+\)' | tr -d '()' | grep -v '^http' | grep -v '^#' | grep -v '^mailto:' || true)
+
+            if [ -n "$INTERNAL_LINKS" ]; then
+              dir=$(dirname "$file")
+
+              while IFS= read -r link; do
+                # Handle relative links
+                if [[ "$link" == /* ]]; then
+                  # Absolute path from docs root
+                  target="docs${link}"
+                  # Handle .html extension (VitePress)
+                  if [[ "$target" == *.html ]]; then
+                    target="${target%.html}.md"
+                  fi
+                  # Add .md if no extension
+                  if [[ "$target" != *.md ]] && [[ ! -d "$target" ]]; then
+                    target="${target}.md"
+                  fi
+                else
+                  # Relative path
+                  target="$dir/$link"
+                  # Handle .html extension (VitePress)
+                  if [[ "$target" == *.html ]]; then
+                    target="${target%.html}.md"
+                  fi
+                fi
+
+                # Check if target exists (file or directory)
+                if [[ ! -f "$target" ]] && [[ ! -d "${target%.md}" ]] && [[ ! -f "${target%.md}/index.md" ]] && [[ ! -f "${target%.md}/README.md" ]]; then
+                  VIOLATIONS="${VIOLATIONS}${file}: Broken link to '${link}'\n"
+                  echo "::warning file=$file::Broken internal link: $link"
+                fi
+              done <<< "$INTERNAL_LINKS"
+            fi
+          done < <(find docs -name "*.md" -type f)
+
+          rm -f .mlc-config.json
+
+          if [ -n "$VIOLATIONS" ]; then
+            echo "### ⚠️ Potentially Broken Internal Links" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo -e "$VIOLATIONS" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Note: Some links may be valid VitePress routes. Review manually if needed._" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ No broken internal links detected" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Don't fail on broken links (just warn) since VitePress routes may differ
+          echo ""
+
+      - name: Verify docs/index.md is up-to-date
+        id: index-check
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Documentation Index Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          node << 'EOF'
+          const fs = require('fs');
+          const path = require('path');
+          const glob = require('glob');
+
+          const indexPath = 'docs/index.md';
+          const indexContent = fs.readFileSync(indexPath, 'utf-8');
+
+          // Get all .md files in docs subdirectories
+          const allDocs = glob.sync('docs/{setup,features,troubleshooting,development,api}/**/*.md')
+            .filter(f => !f.includes('index.md') && !f.includes('README.md'));
+
+          const missing = [];
+
+          for (const doc of allDocs) {
+            // Get the relative path from docs/
+            const relativePath = doc.replace('docs/', '');
+            const filename = path.basename(doc, '.md');
+
+            // Check if the file is mentioned in the index
+            // Look for the filename or path in the index
+            const vitePresPath = '/' + relativePath.replace('.md', '');
+
+            if (!indexContent.includes(filename) && !indexContent.includes(vitePresPath)) {
+              missing.push(doc);
+            }
+          }
+
+          const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+
+          if (missing.length > 0) {
+            fs.appendFileSync(summaryFile, '### ⚠️ Documentation Files Not in Index\n\n');
+            fs.appendFileSync(summaryFile, 'The following files are not referenced in `docs/index.md`:\n\n');
+            fs.appendFileSync(summaryFile, '```\n');
+            missing.forEach(m => fs.appendFileSync(summaryFile, m + '\n'));
+            fs.appendFileSync(summaryFile, '```\n\n');
+            fs.appendFileSync(summaryFile, '**Please add these files to the appropriate section in docs/index.md**\n\n');
+
+            missing.forEach(m => {
+              console.log(`::warning file=${m}::Documentation file not listed in docs/index.md`);
+            });
+          } else {
+            fs.appendFileSync(summaryFile, '✅ All documentation files are referenced in the index\n\n');
+          }
+
+          // This is a warning, not an error
+          process.exit(0);
+          EOF
+
+      - name: Check new docs are in appropriate category
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## New Documentation Category Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Get list of added .md files in this PR
+          ADDED_DOCS=$(git diff --name-only --diff-filter=A origin/${{ github.base_ref }}...HEAD -- 'docs/**/*.md' 2>/dev/null || echo "")
+
+          if [ -z "$ADDED_DOCS" ]; then
+            echo "No new documentation files added in this PR" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          echo "### New Documentation Files" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+
+            # Determine category based on path
+            if [[ "$file" == docs/setup/* ]]; then
+              category="Setup"
+            elif [[ "$file" == docs/features/* ]]; then
+              category="Features"
+            elif [[ "$file" == docs/troubleshooting/* ]]; then
+              category="Troubleshooting"
+            elif [[ "$file" == docs/development/* ]]; then
+              category="Development"
+            elif [[ "$file" == docs/api/* ]]; then
+              category="API"
+            else
+              category="⚠️ Unknown/Uncategorized"
+              echo "::warning file=$file::Documentation added outside of standard categories"
+            fi
+
+            echo "- \`$file\` → **$category**" >> $GITHUB_STEP_SUMMARY
+          done <<< "$ADDED_DOCS"
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Validation Rules Reference" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Rule | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Root files | Only README.md, CHANGELOG.md, CONTRIBUTING.md, LICENSE.md allowed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Subdirectories | All docs must be in setup/, features/, troubleshooting/, development/, or api/ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Naming | Use kebab-case or UPPER_SNAKE_CASE, no spaces |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontmatter | Must include \`title\` (and ideally \`description\`) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Index | All docs should be listed in docs/index.md |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "See [CONTRIBUTING.md](../CONTRIBUTING.md) for detailed guidelines." >> $GITHUB_STEP_SUMMARY

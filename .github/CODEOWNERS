@@ -1,0 +1,37 @@
+# ===========================================
+# FlowRecap CODEOWNERS
+# Defines code ownership and review responsibility
+# ===========================================
+
+# Documentation - All documentation changes require review
+# from the documentation maintainers
+/docs/ @docs-team
+*.md @docs-team
+README.md @core-team @docs-team
+CONTRIBUTING.md @core-team @docs-team
+
+# Core Application
+/src/ @core-team
+/electron/ @core-team
+
+# Python ML Services
+/python/ @ml-team
+
+# Build Configuration
+electron-builder.config.cjs @core-team
+vite.config.ts @core-team
+tsconfig*.json @core-team
+package.json @core-team
+
+# CI/CD Workflows
+/.github/workflows/ @devops-team
+
+# Testing
+/tests/ @qa-team @core-team
+playwright.config.ts @qa-team
+
+# Resources and Assets
+/resources/ @design-team @core-team
+
+# Scripts and Tooling
+/scripts/ @devops-team @core-team

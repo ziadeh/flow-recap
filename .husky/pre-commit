@@ -1,0 +1,15 @@
+#!/bin/sh
+# Pre-commit hook for documentation validation
+
+# Only run docs validation if .md files are staged
+STAGED_MD_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.md$' || true)
+
+if [ -n "$STAGED_MD_FILES" ]; then
+  echo "📄 Markdown files staged for commit. Running documentation checks..."
+
+  # Run the quick documentation validation
+  node scripts/validate-docs.js --quick
+
+  # Also run the original root-level check (for detailed warnings)
+  node scripts/check-root-md-files.js
+fi

@@ -504,7 +504,7 @@ Built distributables are placed in `release/{version}/`:
 - **Windows**: `.exe` (installer), `.zip`, portable
 - **Linux**: `.AppImage`, `.deb`, `.rpm`, `.snap`
 
-> For detailed build instructions, code signing, and CI/CD setup, see [BUILD.md](BUILD.md).
+> For detailed build instructions, code signing, and CI/CD setup, see [BUILD.md](docs/setup/BUILD.md).
 
 ---
 
@@ -647,9 +647,20 @@ FlowRecap needs at least one AI provider for summaries and action items:
 
 ---
 
+## Documentation
+
+For detailed documentation, see the [docs/](docs/) directory:
+
+- **[Setup](docs/setup/)** - Installation, environment configuration, build instructions
+- **[Features](docs/features/)** - Feature documentation and implementation guides
+- **[Troubleshooting](docs/troubleshooting/)** - Common issues and solutions
+- **[Development](docs/development/)** - Contributing, architecture, performance
+
+---
+
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines before submitting a pull request.
+Contributions are welcome! Please read our [contributing guidelines](CONTRIBUTING.md) before submitting a pull request.
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
