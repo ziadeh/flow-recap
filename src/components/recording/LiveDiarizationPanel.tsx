@@ -35,7 +35,9 @@ export interface LiveDiarizationPanelProps {
   recordingDurationMs?: number
   /** Whether to auto-start diarization when recording starts */
   autoStart?: boolean
-  /** Speaker similarity threshold (0.0-1.0, default: 0.5) */
+  /** Speaker similarity threshold (0.0-1.0, default: 0.30)
+   * Lower values = more speakers detected (more sensitive to voice differences)
+   * Typical same-speaker similarity: 0.8-0.95, different speakers: 0.2-0.5 */
   similarityThreshold?: number
   /** Maximum number of speakers to track */
   maxSpeakers?: number
@@ -130,7 +132,8 @@ export const LiveDiarizationPanel = memo(function LiveDiarizationPanel({
   // recordingDurationMs is available for future use (e.g., timeline visualization)
   recordingDurationMs: _recordingDurationMs = 0,
   autoStart = true,
-  similarityThreshold = 0.5,
+  // FIXED: Lowered from 0.5 to 0.30 to prevent merging of distinct speakers
+  similarityThreshold = 0.30,
   maxSpeakers = 10,
   onSpeakerChange,
   className,

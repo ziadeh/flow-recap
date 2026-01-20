@@ -95,7 +95,7 @@ try {
 const DB_NAME = 'meeting-notes.db'
 // Legacy database name (for migration purposes)
 const LEGACY_DB_NAME = 'meeting-notes.db'
-const CURRENT_SCHEMA_VERSION = 15
+const CURRENT_SCHEMA_VERSION = 18
 
 // ============================================================================
 // Schema Migrations
@@ -1233,6 +1233,296 @@ const migrations: Migration[] = [
       ALTER TABLE transcripts DROP COLUMN IF EXISTS is_compressed;
       ALTER TABLE transcripts DROP COLUMN IF EXISTS content_uncompressed;
       ALTER TABLE transcripts DROP COLUMN IF EXISTS filler_map;
+    `
+  },
+  {
+    version: 16,
+    name: 'add_delta_model_update_tables',
+    up: `
+      -- ========================================
+      -- Model Chunks table
+      -- ========================================
+      -- Content-addressed storage for model chunks
+      -- Enables delta updates by storing and deduplicating chunks
+      CREATE TABLE IF NOT EXISTS model_chunks (
+        id TEXT PRIMARY KEY NOT NULL,
+        hash TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        version TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        original_size INTEGER NOT NULL,
+        compressed_size INTEGER NOT NULL,
+        compression_type TEXT NOT NULL DEFAULT 'gzip',
+        local_path TEXT NOT NULL,
+        ref_count INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'downloading', 'verified', 'corrupted', 'missing')),
+        created_at INTEGER NOT NULL,
+        last_accessed_at INTEGER NOT NULL,
+        UNIQUE(model_id, version, chunk_index)
+      );
+
+      -- Indexes for model_chunks
+      CREATE INDEX IF NOT EXISTS idx_model_chunks_hash ON model_chunks(hash);
+      CREATE INDEX IF NOT EXISTS idx_model_chunks_model_id ON model_chunks(model_id);
+      CREATE INDEX IF NOT EXISTS idx_model_chunks_model_version ON model_chunks(model_id, version);
+      CREATE INDEX IF NOT EXISTS idx_model_chunks_status ON model_chunks(status);
+      CREATE INDEX IF NOT EXISTS idx_model_chunks_last_accessed ON model_chunks(last_accessed_at);
+
+      -- ========================================
+      -- Chunk Deduplication Index table
+      -- ========================================
+      -- Maps chunk hashes to chunk IDs for efficient deduplication
+      CREATE TABLE IF NOT EXISTS chunk_deduplication_index (
+        hash TEXT PRIMARY KEY NOT NULL,
+        chunk_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (chunk_id) REFERENCES model_chunks(id) ON DELETE CASCADE
+      );
+
+      -- ========================================
+      -- Model Manifests table
+      -- ========================================
+      -- Stores version manifests for each model
+      CREATE TABLE IF NOT EXISTS model_manifests (
+        id TEXT PRIMARY KEY NOT NULL,
+        model_id TEXT NOT NULL,
+        version TEXT NOT NULL,
+        manifest_json TEXT NOT NULL,
+        total_chunks INTEGER NOT NULL,
+        total_size INTEGER NOT NULL,
+        chunk_size INTEGER NOT NULL,
+        assembled_hash TEXT NOT NULL,
+        is_current INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(model_id, version)
+      );
+
+      -- Indexes for model_manifests
+      CREATE INDEX IF NOT EXISTS idx_model_manifests_model_id ON model_manifests(model_id);
+      CREATE INDEX IF NOT EXISTS idx_model_manifests_current ON model_manifests(model_id, is_current);
+
+      -- ========================================
+      -- Model Update Queue table
+      -- ========================================
+      -- Tracks pending and active model downloads
+      CREATE TABLE IF NOT EXISTS model_update_queue (
+        id TEXT PRIMARY KEY NOT NULL,
+        model_id TEXT NOT NULL,
+        target_version TEXT NOT NULL,
+        priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('critical', 'high', 'normal', 'low', 'background')),
+        status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'active', 'paused', 'completed', 'failed', 'cancelled')),
+        plan_json TEXT NOT NULL,
+        progress_json TEXT NOT NULL,
+        queued_at INTEGER NOT NULL,
+        started_at INTEGER,
+        completed_at INTEGER,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        max_retries INTEGER NOT NULL DEFAULT 3,
+        error TEXT,
+        UNIQUE(model_id, target_version)
+      );
+
+      -- Indexes for model_update_queue
+      CREATE INDEX IF NOT EXISTS idx_model_update_queue_status ON model_update_queue(status);
+      CREATE INDEX IF NOT EXISTS idx_model_update_queue_priority ON model_update_queue(priority, queued_at);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_model_update_queue_priority;
+      DROP INDEX IF EXISTS idx_model_update_queue_status;
+      DROP TABLE IF EXISTS model_update_queue;
+      DROP INDEX IF EXISTS idx_model_manifests_current;
+      DROP INDEX IF EXISTS idx_model_manifests_model_id;
+      DROP TABLE IF EXISTS model_manifests;
+      DROP TABLE IF EXISTS chunk_deduplication_index;
+      DROP INDEX IF EXISTS idx_model_chunks_last_accessed;
+      DROP INDEX IF EXISTS idx_model_chunks_status;
+      DROP INDEX IF EXISTS idx_model_chunks_model_version;
+      DROP INDEX IF EXISTS idx_model_chunks_model_id;
+      DROP INDEX IF EXISTS idx_model_chunks_hash;
+      DROP TABLE IF EXISTS model_chunks;
+    `
+  },
+  {
+    version: 17,
+    name: 'fix_diarization_threshold_default',
+    up: `
+      -- ========================================
+      -- Fix Diarization Threshold for Existing Users
+      -- ========================================
+      -- The default diarization threshold was incorrectly set to 0.5 in the UI,
+      -- which is too high and causes different speakers to be merged into one.
+      -- This migration updates existing users' thresholds to the correct value.
+      --
+      -- Technical details:
+      -- - A threshold of 0.5 means speakers must be >50% dissimilar to be differentiated
+      -- - Typical same-speaker similarity: 0.8-0.95, different speakers: 0.2-0.5
+      -- - With 0.5, voices with 0.5+ similarity are merged (incorrectly)
+      -- - Lowering to 0.30 allows proper speaker separation
+      --
+      -- Only update if the user has the old default value (0.4 or 0.5)
+      -- Don't touch users who have explicitly set a custom value
+      UPDATE settings
+      SET value = '0.3', updated_at = datetime('now')
+      WHERE key = 'transcription.diarization.threshold'
+        AND (value = '0.5' OR value = '0.4' OR value = '0.50' OR value = '0.40');
+    `,
+    down: `
+      -- Rollback: restore old threshold values
+      -- Note: This will affect all users, not just those who were auto-migrated
+      UPDATE settings
+      SET value = '0.5', updated_at = datetime('now')
+      WHERE key = 'transcription.diarization.threshold' AND value = '0.3';
+    `
+  },
+  {
+    version: 18,
+    name: 'add_speaker_embeddings_storage',
+    up: `
+      -- ========================================
+      -- Speaker Embeddings Storage for Persistent Voice Recognition
+      -- ========================================
+      -- This migration adds tables to store speaker voice embeddings (fingerprints)
+      -- enabling persistent speaker recognition across chunks and meetings.
+      --
+      -- Key benefits:
+      -- 1. Consistent speaker IDs across audio chunks (fixes speaker_0 in every chunk issue)
+      -- 2. Speaker re-identification across different meetings
+      -- 3. Gradual profile improvement as more embeddings are collected
+      -- 4. Ability to manually merge/split speakers retrospectively
+
+      -- ========================================
+      -- Speaker Embeddings Table
+      -- ========================================
+      -- Stores individual voice embedding vectors for each speaker segment
+      CREATE TABLE IF NOT EXISTS speaker_embeddings (
+        id TEXT PRIMARY KEY NOT NULL,
+        speaker_id TEXT NOT NULL,
+        meeting_id TEXT,  -- Optional: link to meeting where first detected
+        embedding_vector BLOB NOT NULL,  -- Serialized numpy array (compressed)
+        embedding_dimension INTEGER NOT NULL,  -- e.g., 192 for pyannote, 512 for speechbrain
+        extraction_model TEXT NOT NULL,  -- e.g., "pyannote/embedding"
+        model_version TEXT,  -- Model version for compatibility tracking
+        confidence_score REAL NOT NULL DEFAULT 1.0,
+        audio_segment_start_ms INTEGER,  -- Original audio timestamp
+        audio_segment_end_ms INTEGER,
+        audio_quality_score REAL,  -- Optional: measure of audio quality
+        is_verified INTEGER NOT NULL DEFAULT 0,  -- User verified this embedding
+        verification_method TEXT CHECK(verification_method IN ('manual', 'automatic', 'high_confidence') OR verification_method IS NULL),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (speaker_id) REFERENCES speakers(id) ON DELETE CASCADE,
+        FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE SET NULL
+      );
+
+      -- Indexes for fast embedding lookup and matching
+      CREATE INDEX IF NOT EXISTS idx_speaker_embeddings_speaker_id ON speaker_embeddings(speaker_id);
+      CREATE INDEX IF NOT EXISTS idx_speaker_embeddings_meeting_id ON speaker_embeddings(meeting_id);
+      CREATE INDEX IF NOT EXISTS idx_speaker_embeddings_model ON speaker_embeddings(extraction_model);
+      CREATE INDEX IF NOT EXISTS idx_speaker_embeddings_confidence ON speaker_embeddings(confidence_score DESC);
+      CREATE INDEX IF NOT EXISTS idx_speaker_embeddings_verified ON speaker_embeddings(is_verified);
+
+      -- ========================================
+      -- Speaker Profiles Table
+      -- ========================================
+      -- Aggregated statistics and metadata for each speaker
+      CREATE TABLE IF NOT EXISTS speaker_profiles (
+        id TEXT PRIMARY KEY NOT NULL,
+        speaker_id TEXT NOT NULL UNIQUE,
+        embedding_count INTEGER NOT NULL DEFAULT 0,
+        average_confidence REAL NOT NULL DEFAULT 1.0,
+        centroid_embedding BLOB,  -- Average embedding for fast matching
+        centroid_dimension INTEGER,
+        extraction_model TEXT,  -- Model used for centroid
+        first_seen_meeting_id TEXT,
+        last_seen_meeting_id TEXT,
+        first_seen_at TEXT,
+        last_seen_at TEXT,
+        total_speaking_duration_seconds INTEGER DEFAULT 0,
+        total_segments INTEGER DEFAULT 0,
+        profile_quality TEXT NOT NULL DEFAULT 'learning' CHECK(profile_quality IN ('learning', 'stable', 'verified')),
+        embedding_variance REAL,  -- Measure of voice consistency
+        notes TEXT,  -- User notes about this speaker
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (speaker_id) REFERENCES speakers(id) ON DELETE CASCADE,
+        FOREIGN KEY (first_seen_meeting_id) REFERENCES meetings(id) ON DELETE SET NULL,
+        FOREIGN KEY (last_seen_meeting_id) REFERENCES meetings(id) ON DELETE SET NULL
+      );
+
+      -- Indexes for speaker profile queries
+      CREATE INDEX IF NOT EXISTS idx_speaker_profiles_speaker_id ON speaker_profiles(speaker_id);
+      CREATE INDEX IF NOT EXISTS idx_speaker_profiles_quality ON speaker_profiles(profile_quality);
+      CREATE INDEX IF NOT EXISTS idx_speaker_profiles_embedding_count ON speaker_profiles(embedding_count DESC);
+      CREATE INDEX IF NOT EXISTS idx_speaker_profiles_last_seen ON speaker_profiles(last_seen_at DESC);
+
+      -- ========================================
+      -- Speaker Matching Log Table
+      -- ========================================
+      -- Tracks speaker matching decisions for debugging and improvement
+      CREATE TABLE IF NOT EXISTS speaker_matching_log (
+        id TEXT PRIMARY KEY NOT NULL,
+        meeting_id TEXT NOT NULL,
+        audio_segment_start_ms INTEGER NOT NULL,
+        audio_segment_end_ms INTEGER NOT NULL,
+        matched_speaker_id TEXT,
+        similarity_score REAL,
+        second_best_speaker_id TEXT,  -- For disambiguation tracking
+        second_best_similarity REAL,
+        matching_method TEXT NOT NULL CHECK(matching_method IN ('centroid', 'ensemble', 'temporal', 'manual')),
+        is_new_speaker INTEGER NOT NULL DEFAULT 0,
+        confidence_level TEXT NOT NULL DEFAULT 'medium' CHECK(confidence_level IN ('low', 'medium', 'high', 'verified')),
+        decision_factors TEXT,  -- JSON: reasons for this match decision
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE,
+        FOREIGN KEY (matched_speaker_id) REFERENCES speakers(id) ON DELETE SET NULL,
+        FOREIGN KEY (second_best_speaker_id) REFERENCES speakers(id) ON DELETE SET NULL
+      );
+
+      -- Indexes for matching log queries
+      CREATE INDEX IF NOT EXISTS idx_speaker_matching_log_meeting_id ON speaker_matching_log(meeting_id);
+      CREATE INDEX IF NOT EXISTS idx_speaker_matching_log_matched_speaker ON speaker_matching_log(matched_speaker_id);
+      CREATE INDEX IF NOT EXISTS idx_speaker_matching_log_timestamp ON speaker_matching_log(meeting_id, audio_segment_start_ms);
+      CREATE INDEX IF NOT EXISTS idx_speaker_matching_log_new_speakers ON speaker_matching_log(is_new_speaker);
+
+      -- ========================================
+      -- Triggers for automatic timestamp updates
+      -- ========================================
+      CREATE TRIGGER IF NOT EXISTS update_speaker_embeddings_timestamp
+      AFTER UPDATE ON speaker_embeddings
+      BEGIN
+        UPDATE speaker_embeddings SET updated_at = datetime('now') WHERE id = NEW.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS update_speaker_profiles_timestamp_v18
+      AFTER UPDATE ON speaker_profiles
+      BEGIN
+        UPDATE speaker_profiles SET updated_at = datetime('now') WHERE id = NEW.id;
+      END;
+    `,
+    down: `
+      -- Rollback: Remove all speaker embedding tables
+      DROP TRIGGER IF EXISTS update_speaker_profiles_timestamp_v18;
+      DROP TRIGGER IF EXISTS update_speaker_embeddings_timestamp;
+
+      DROP INDEX IF EXISTS idx_speaker_matching_log_new_speakers;
+      DROP INDEX IF EXISTS idx_speaker_matching_log_timestamp;
+      DROP INDEX IF EXISTS idx_speaker_matching_log_matched_speaker;
+      DROP INDEX IF EXISTS idx_speaker_matching_log_meeting_id;
+      DROP TABLE IF EXISTS speaker_matching_log;
+
+      DROP INDEX IF EXISTS idx_speaker_profiles_last_seen;
+      DROP INDEX IF EXISTS idx_speaker_profiles_embedding_count;
+      DROP INDEX IF EXISTS idx_speaker_profiles_quality;
+      DROP INDEX IF EXISTS idx_speaker_profiles_speaker_id;
+      DROP TABLE IF EXISTS speaker_profiles;
+
+      DROP INDEX IF EXISTS idx_speaker_embeddings_verified;
+      DROP INDEX IF EXISTS idx_speaker_embeddings_confidence;
+      DROP INDEX IF EXISTS idx_speaker_embeddings_model;
+      DROP INDEX IF EXISTS idx_speaker_embeddings_meeting_id;
+      DROP INDEX IF EXISTS idx_speaker_embeddings_speaker_id;
+      DROP TABLE IF EXISTS speaker_embeddings;
     `
   }
 ]

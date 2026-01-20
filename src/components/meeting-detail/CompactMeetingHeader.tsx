@@ -80,7 +80,6 @@ export function CompactMeetingHeader({
   void _deviceType
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState(meeting.title)
-  const [isSavingTitle, setIsSavingTitle] = useState(false)
   const [isScrolled, setIsScrolled] = useState(false)
   const [showOverflowMenu, setShowOverflowMenu] = useState(false)
   const [showExportDropdown, setShowExportDropdown] = useState(false)
@@ -138,15 +137,18 @@ export function CompactMeetingHeader({
   }
 
   const handleTitleBlur = async () => {
-    if (titleValue.trim() !== meeting.title && onTitleChange) {
-      setIsSavingTitle(true)
+    const trimmedTitle = titleValue.trim()
+    if (trimmedTitle !== meeting.title && onTitleChange) {
+      // Optimistic update: Update local state immediately for instant feedback
+      // The parent component handles the database update asynchronously
+      // No need to show spinner since the UI updates instantly
       try {
-        await onTitleChange(titleValue.trim())
+        // Call the callback but don't await - let it run in the background
+        // The parent will update the store immediately for optimistic UI
+        onTitleChange(trimmedTitle)
       } catch (error) {
         console.error('Failed to save title:', error)
         setTitleValue(meeting.title) // Revert on error
-      } finally {
-        setIsSavingTitle(false)
       }
     }
     setIsEditingTitle(false)
@@ -269,7 +271,6 @@ export function CompactMeetingHeader({
                 onChange={(e) => setTitleValue(e.target.value)}
                 onBlur={handleTitleBlur}
                 onKeyDown={handleTitleKeyDown}
-                disabled={isSavingTitle}
                 data-testid="title-input"
                 className={`flex-1 font-semibold text-foreground bg-transparent border-b-2 border-purple-400 focus:outline-none focus:border-purple-600 transition-colors ${
                   isMobile ? 'text-base' : 'text-lg'
@@ -282,10 +283,10 @@ export function CompactMeetingHeader({
                     isMobile ? 'text-base' : 'text-lg'
                   }`}
                   onClick={handleTitleClick}
-                  title={meeting.title}
+                  title={titleValue}
                   data-testid="meeting-title"
                 >
-                  {meeting.title}
+                  {titleValue}
                 </h1>
                 {/* Hide edit button on mobile - use overflow menu instead */}
                 {!isMobile && (
@@ -300,9 +301,6 @@ export function CompactMeetingHeader({
                   </button>
                 )}
               </>
-            )}
-            {isSavingTitle && (
-              <Loader2 className="w-4 h-4 animate-spin text-purple-500" />
             )}
           </div>
 

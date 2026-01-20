@@ -629,8 +629,9 @@ export const speakerDiarizationService = {
     const segmentDuration = config.segmentDuration || 2.0
     const hopDuration = config.hopDuration || 0.5
     // Lower threshold = more speakers detected (more sensitive to voice differences)
-    // Default 0.4 provides better speaker separation for similar-sounding voices
-    const similarityThreshold = config.similarityThreshold || 0.4
+    // FIXED: Lowered from 0.4 to 0.30 to prevent merging of distinct speakers
+    // (typical same-speaker similarity: 0.8-0.95, different speakers: 0.2-0.5)
+    const similarityThreshold = config.similarityThreshold || 0.30
     const maxSpeakers = config.maxSpeakers || 10
     const device = config.device || 'cpu'
 

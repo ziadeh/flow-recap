@@ -516,6 +516,53 @@ export interface DiagnosticMessage {
 }
 
 // ============================================================================
+// Device Recommendation Types
+// ============================================================================
+
+export type RecommendationConfidence = 'high' | 'medium' | 'low'
+
+export interface DeviceRecommendation {
+  deviceId: string
+  deviceName: string
+  deviceType: AudioDeviceType
+  confidence: RecommendationConfidence
+  confidenceScore: number // 0.0 to 1.0 for precise confidence
+  reason: string
+  isVirtualCable: boolean
+  virtualCableType: VirtualCableType | null
+  isPrimary: boolean // Whether this is the primary recommendation for its category
+}
+
+export interface AudioSetupRecommendation {
+  // Primary recommendations (most common setup: system audio + microphone)
+  inputDevice: DeviceRecommendation | null
+  outputDevice: DeviceRecommendation | null
+  systemAudioDevice: DeviceRecommendation | null // Virtual cable for capturing system audio
+
+  // All detected virtual cables with their status
+  detectedVirtualCables: Array<{
+    device: AudioDevice
+    cableType: VirtualCableType
+    isRecommended: boolean
+    installationStatus: 'installed' | 'not_installed' | 'unknown'
+  }>
+
+  // Configuration confidence
+  overallConfidence: RecommendationConfidence
+  overallConfidenceScore: number
+
+  // Setup type description
+  setupType: 'complete' | 'microphone_only' | 'system_audio_only' | 'minimal' | 'none'
+  setupDescription: string
+
+  // Recommendations for improvement
+  suggestions: string[]
+
+  // Platform-specific notes
+  platformNotes: string | null
+}
+
+// ============================================================================
 // Audio Device API Types (for IPC)
 // ============================================================================
 
@@ -526,6 +573,7 @@ export interface AudioDeviceAPI {
   isVirtualCableInstalled: (cableType: VirtualCableType) => Promise<boolean>
   getRecommendedVirtualCable: () => Promise<VirtualCableType | null>
   getInstallationInstructions: (cableType?: VirtualCableType) => Promise<string>
+  getRecommendations: () => Promise<AudioSetupRecommendation>
 }
 
 // ============================================================================
@@ -914,4 +962,180 @@ export interface SpeakerNameDetectionAPI {
   // Configuration
   getConfig: () => Promise<SpeakerNameDetectionConfig>
   updateConfig: (config: Partial<SpeakerNameDetectionConfig>) => Promise<SpeakerNameDetectionConfig>
+}
+
+// ============================================================================
+// Speaker Participation Analytics Types
+// ============================================================================
+
+/**
+ * Participation statistics for a single speaker in a meeting
+ */
+export interface SpeakerParticipation {
+  speakerId: string
+  speakerName: string
+  /** Total time the speaker was talking in milliseconds */
+  talkTimeMs: number
+  /** Percentage of meeting time this speaker was talking */
+  talkTimePercentage: number
+  /** Number of times the speaker spoke */
+  segmentCount: number
+  /** Average duration of each speaking segment in ms */
+  averageSegmentDurationMs: number
+  /** Longest speaking segment duration in ms */
+  longestSegmentMs: number
+  /** When the speaker first spoke (ms from meeting start) */
+  firstSpokeAtMs: number
+  /** When the speaker last spoke (ms from meeting start) */
+  lastSpokeAtMs: number
+  /** Average confidence score of their transcripts */
+  averageConfidence: number
+  /** Total word count for this speaker */
+  wordCount: number
+  /** Words per minute (speaking rate) */
+  wordsPerMinute: number
+}
+
+/**
+ * Meeting-level participation analytics
+ */
+export interface MeetingParticipationAnalytics {
+  meetingId: string
+  meetingTitle: string
+  /** Meeting start time */
+  startTime: string
+  /** Meeting end time */
+  endTime: string | null
+  /** Total meeting duration in milliseconds */
+  totalDurationMs: number
+  /** Number of speakers in the meeting */
+  speakerCount: number
+  /** Participation stats per speaker */
+  speakers: SpeakerParticipation[]
+  /** Whether participation is balanced (based on standard deviation) */
+  isBalanced: boolean
+  /** Gini coefficient measuring participation inequality (0 = equal, 1 = dominated by one speaker) */
+  giniCoefficient: number
+  /** Speaker with the most talk time */
+  dominantSpeaker: SpeakerParticipation | null
+  /** Total word count across all speakers */
+  totalWordCount: number
+  /** Total number of speaker turns/changes */
+  totalSpeakerTurns: number
+  /** Average words per speaker turn */
+  averageWordsPerTurn: number
+}
+
+/**
+ * Aggregated participation trends across multiple meetings
+ */
+export interface ParticipationTrend {
+  /** Time period for this data point (ISO date string) */
+  period: string
+  /** Number of meetings in this period */
+  meetingCount: number
+  /** Total meeting time in this period (ms) */
+  totalMeetingTimeMs: number
+  /** Average meeting duration (ms) */
+  averageMeetingDurationMs: number
+  /** Participation breakdown by speaker across all meetings */
+  speakerParticipation: Array<{
+    speakerId: string
+    speakerName: string
+    /** Total talk time across all meetings in this period */
+    totalTalkTimeMs: number
+    /** Number of meetings they participated in */
+    meetingsParticipated: number
+    /** Average talk time percentage per meeting */
+    averageTalkTimePercentage: number
+  }>
+  /** Average Gini coefficient for meetings in this period */
+  averageGiniCoefficient: number
+}
+
+/**
+ * Speaker participation report for a project or team over time
+ */
+export interface ParticipationReport {
+  /** Report generation timestamp */
+  generatedAt: string
+  /** Time range start (ISO date string) */
+  startDate: string
+  /** Time range end (ISO date string) */
+  endDate: string
+  /** Total number of meetings analyzed */
+  totalMeetings: number
+  /** Total meeting time analyzed (ms) */
+  totalMeetingTimeMs: number
+  /** Overall participation by speaker across all meetings */
+  overallParticipation: Array<{
+    speakerId: string
+    speakerName: string
+    totalTalkTimeMs: number
+    averageTalkTimePercentage: number
+    meetingsParticipated: number
+    participationRate: number // % of meetings they participated in
+    averageWordsPerMeeting: number
+  }>
+  /** Trend data over time */
+  trends: ParticipationTrend[]
+  /** Insights and recommendations */
+  insights: ParticipationInsight[]
+}
+
+/**
+ * AI-generated or computed insight about participation patterns
+ */
+export interface ParticipationInsight {
+  type: 'warning' | 'info' | 'suggestion'
+  category: 'balance' | 'frequency' | 'duration' | 'trend'
+  title: string
+  description: string
+  /** Related speaker IDs if applicable */
+  relatedSpeakers?: string[]
+}
+
+/**
+ * Options for generating participation reports
+ */
+export interface ParticipationReportOptions {
+  /** Start date for the report (ISO string) */
+  startDate?: string
+  /** End date for the report (ISO string) */
+  endDate?: string
+  /** Filter by specific meeting IDs */
+  meetingIds?: string[]
+  /** Filter by meeting type */
+  meetingType?: MeetingType
+  /** How to group trend data */
+  trendGrouping?: 'day' | 'week' | 'month'
+  /** Whether to include AI-generated insights */
+  includeInsights?: boolean
+}
+
+/**
+ * API for speaker participation analytics (for IPC)
+ */
+export interface SpeakerParticipationAPI {
+  // Single meeting analytics
+  getMeetingParticipation: (meetingId: string) => Promise<MeetingParticipationAnalytics | null>
+
+  // Multi-meeting reports
+  generateReport: (options?: ParticipationReportOptions) => Promise<ParticipationReport>
+
+  // Trend data
+  getTrends: (
+    startDate: string,
+    endDate: string,
+    grouping?: 'day' | 'week' | 'month'
+  ) => Promise<ParticipationTrend[]>
+
+  // Quick stats for dashboard
+  getQuickStats: (meetingId: string) => Promise<{
+    speakerCount: number
+    totalDurationMs: number
+    isBalanced: boolean
+    dominantSpeakerName: string | null
+    dominantSpeakerPercentage: number | null
+  } | null>
 }

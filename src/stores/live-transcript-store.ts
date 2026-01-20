@@ -376,13 +376,25 @@ export const useLiveTranscriptStore = create<LiveTranscriptState & LiveTranscrip
         streamingDiarization: { ...current.streamingDiarization, ...state }
       }))
 
-      // Log significant state changes
+      // Debug logging: Streaming diarization state changes
+      console.group('[DiarizationDebug:Frontend] setStreamingDiarizationState')
+      console.log(`Timestamp: ${new Date().toISOString()}`)
       if (state.status) {
-        console.log(`[LiveTranscriptStore] Streaming diarization status: ${state.status}`)
+        console.log(`Status: ${state.status}`)
+      }
+      if (state.numSpeakersDetected !== undefined) {
+        console.log(`Speakers detected: ${state.numSpeakersDetected}`)
       }
       if (state.coldStartComplete) {
-        console.log('[LiveTranscriptStore] Streaming diarization cold-start complete')
+        console.log('Cold-start complete: true')
       }
+      if (state.totalAudioProcessed !== undefined) {
+        console.log(`Total audio processed: ${state.totalAudioProcessed.toFixed(2)}s`)
+      }
+      if (state.error) {
+        console.error(`Error: ${state.error}`)
+      }
+      console.groupEnd()
     },
 
     addSpeakerSegment: (segment: StreamingSpeakerSegment) => {
@@ -412,6 +424,19 @@ export const useLiveTranscriptStore = create<LiveTranscriptState & LiveTranscrip
           return transcriptSeg
         })
 
+        // Debug logging: Speaker segment received
+        console.group('[DiarizationDebug:Frontend] addSpeakerSegment')
+        console.log(`Timestamp: ${new Date().toISOString()}`)
+        console.log(`Segment ID: ${segment.id}`)
+        console.log(`Speaker: ${segment.speaker}`)
+        console.log(`Time range: ${segment.startTime.toFixed(2)}s - ${segment.endTime.toFixed(2)}s`)
+        console.log(`Confidence: ${segment.confidence.toFixed(3)}`)
+        console.log(`Is final: ${segment.isFinal}`)
+        console.log(`Total speaker segments: ${newSegments.length}`)
+        const uniqueSpeakers = [...new Set(newSegments.map(s => s.speaker))]
+        console.log(`Unique speakers: ${uniqueSpeakers.join(', ')}`)
+        console.groupEnd()
+
         return {
           speakerSegments: newSegments,
           segments: updatedTranscriptSegments,
@@ -427,6 +452,13 @@ export const useLiveTranscriptStore = create<LiveTranscriptState & LiveTranscrip
         ),
         lastUpdateTime: Date.now()
       }))
+
+      // Debug logging: Speaker segment updated
+      console.group('[DiarizationDebug:Frontend] updateSpeakerSegment')
+      console.log(`Timestamp: ${new Date().toISOString()}`)
+      console.log(`Segment ID: ${id}`)
+      console.log(`Updates:`, updates)
+      console.groupEnd()
     },
 
     addSpeakerChange: (event: SpeakerChangeEvent) => {
@@ -435,7 +467,14 @@ export const useLiveTranscriptStore = create<LiveTranscriptState & LiveTranscrip
         lastUpdateTime: Date.now()
       }))
 
-      console.log(`[LiveTranscriptStore] Speaker change: ${event.fromSpeaker || 'none'} -> ${event.toSpeaker} at ${event.time.toFixed(2)}s`)
+      // Debug logging: Speaker change event received
+      console.group('[DiarizationDebug:Frontend] addSpeakerChange')
+      console.log(`Timestamp: ${new Date().toISOString()}`)
+      console.log(`Time: ${event.time.toFixed(2)}s`)
+      console.log(`From: ${event.fromSpeaker || 'none'}`)
+      console.log(`To: ${event.toSpeaker}`)
+      console.log(`Confidence: ${event.confidence.toFixed(3)}`)
+      console.groupEnd()
     },
 
     applyRetroactiveCorrection: (correction: RetroactiveCorrectionEvent) => {
@@ -470,6 +509,16 @@ export const useLiveTranscriptStore = create<LiveTranscriptState & LiveTranscrip
           return seg
         })
 
+        // Debug logging: Retroactive correction applied
+        console.group('[DiarizationDebug:Frontend] applyRetroactiveCorrection')
+        console.log(`Timestamp: ${new Date().toISOString()}`)
+        console.log(`Original speaker: ${correction.originalSpeaker}`)
+        console.log(`Corrected speaker: ${correction.correctedSpeaker}`)
+        console.log(`Time range: ${correction.startTime.toFixed(2)}s - ${correction.endTime.toFixed(2)}s`)
+        console.log(`Affected segments: ${correction.affectedSegmentIds.length}`)
+        console.log(`Reason: ${correction.reason}`)
+        console.groupEnd()
+
         return {
           speakerSegments: updatedSpeakerSegments,
           segments: updatedTranscriptSegments,
@@ -477,8 +526,6 @@ export const useLiveTranscriptStore = create<LiveTranscriptState & LiveTranscrip
           lastUpdateTime: Date.now()
         }
       })
-
-      console.log(`[LiveTranscriptStore] Retroactive correction: ${correction.originalSpeaker} -> ${correction.correctedSpeaker} (${correction.affectedSegmentIds.length} segments)`)
     },
 
     clearStreamingDiarization: () => {
@@ -724,3 +771,104 @@ export const useLiveTranscriptActions = () =>
     getTranscriptsForSave: state.getTranscriptsForSave,
     saveToDatabase: state.saveToDatabase,
   })))
+
+// ============================================================================
+// Debug Hooks for Speaker Timeline Debugging
+// ============================================================================
+
+/**
+ * Debug data interface for speaker events
+ */
+export interface SpeakerDebugData {
+  // Counts
+  speakerSegmentCount: number
+  speakerChangeCount: number
+  uniqueSpeakerCount: number
+  retroactiveCorrectionCount: number
+
+  // Status
+  streamingStatus: string
+  coldStartComplete: boolean
+  numSpeakersDetected: number
+  totalAudioProcessed: number
+
+  // Timestamps
+  lastUpdateTime: number | null
+
+  // Active speaker
+  currentSpeaker: string | null
+
+  // Unique speakers list
+  uniqueSpeakers: string[]
+}
+
+/**
+ * Hook for debugging speaker events during live recording.
+ * Returns comprehensive debug data about speaker detection state.
+ *
+ * Use this to diagnose issues where:
+ * - Speaker timeline component is not updating
+ * - Speaker events are received but UI doesn't reflect them
+ * - Multi-track timeline shows incorrect data
+ */
+export const useSpeakerDebugData = (): SpeakerDebugData =>
+  useLiveTranscriptStore((state) => {
+    const uniqueSpeakers = [...new Set(state.speakerSegments.map(s => s.speaker))]
+    const lastSpeakerChange = state.speakerChanges.length > 0
+      ? state.speakerChanges[state.speakerChanges.length - 1]
+      : null
+
+    return {
+      speakerSegmentCount: state.speakerSegments.length,
+      speakerChangeCount: state.speakerChanges.length,
+      uniqueSpeakerCount: uniqueSpeakers.length,
+      retroactiveCorrectionCount: state.retroactiveCorrections.length,
+
+      streamingStatus: state.streamingDiarization.status,
+      coldStartComplete: state.streamingDiarization.coldStartComplete,
+      numSpeakersDetected: state.streamingDiarization.numSpeakersDetected,
+      totalAudioProcessed: state.streamingDiarization.totalAudioProcessed,
+
+      lastUpdateTime: state.lastUpdateTime,
+
+      currentSpeaker: lastSpeakerChange?.toSpeaker ||
+        (state.speakerSegments.length > 0
+          ? state.speakerSegments[state.speakerSegments.length - 1].speaker
+          : null),
+
+      uniqueSpeakers,
+    }
+  })
+
+/**
+ * Hook to check if speaker events are being received but UI is stale.
+ * Returns true if there's a potential UI update issue.
+ */
+export const useSpeakerUIStaleCheck = (): { isStale: boolean; reason: string | null } =>
+  useLiveTranscriptStore((state) => {
+    const isActive = state.streamingDiarization.status === 'active' ||
+                     state.streamingDiarization.status === 'ready'
+
+    // Check for common issues
+    if (!isActive) {
+      return { isStale: false, reason: null }
+    }
+
+    // If active but no segments after processing audio
+    if (state.speakerSegments.length === 0 && state.streamingDiarization.totalAudioProcessed > 5) {
+      return {
+        isStale: true,
+        reason: `No speaker segments received after ${state.streamingDiarization.totalAudioProcessed.toFixed(1)}s of audio`
+      }
+    }
+
+    // If last update was more than 10 seconds ago during active recording
+    if (state.lastUpdateTime && Date.now() - state.lastUpdateTime > 10000) {
+      return {
+        isStale: true,
+        reason: `No updates for ${Math.floor((Date.now() - state.lastUpdateTime) / 1000)}s`
+      }
+    }
+
+    return { isStale: false, reason: null }
+  })

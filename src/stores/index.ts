@@ -12,13 +12,18 @@ export {
   useLiveTranscriptStatus,
   useLiveTranscriptSegments,
   useLiveTranscriptError,
-  useIsLiveTranscriptActive
+  useIsLiveTranscriptActive,
+  // Debug hooks for speaker timeline debugging
+  useSpeakerDebugData,
+  useSpeakerUIStaleCheck,
 } from './live-transcript-store'
 export type {
   LiveTranscriptStatus,
   LiveTranscriptSegment,
   LiveTranscriptError,
-  TranscriptionProgress
+  TranscriptionProgress,
+  // Debug types
+  SpeakerDebugData,
 } from './live-transcript-store'
 export { useTaskFilterStore, DEFAULT_TASK_FILTERS } from './task-filter-store'
 export type { TaskFilters } from './task-filter-store'

@@ -134,8 +134,10 @@ function AudioSettings() {
   // Default to true since diarization should be enabled by default
   const [diarizationEnabled, setDiarizationEnabled] = useState(true)
   // Lower threshold = more speakers detected (more sensitive to voice differences)
-  // Default 0.5 provides better separation than pyannote's default of 0.7
-  const [diarizationThreshold, setDiarizationThreshold] = useState(0.5)
+  // Default 0.30 provides better multi-speaker separation
+  // (typical same-speaker similarity: 0.8-0.95, different speakers: 0.2-0.5)
+  // FIXED: Lowered from 0.5 to 0.30 to prevent merging of distinct speakers
+  const [diarizationThreshold, setDiarizationThreshold] = useState(0.30)
   const [maxSpeakers, setMaxSpeakers] = useState(10)
   const [transcriptionOnlyMode, setTranscriptionOnlyMode] = useState(false)
   const [transcriptionOnlyAcknowledged, setTranscriptionOnlyAcknowledged] = useState(false)

@@ -15,9 +15,10 @@ import { RecordingStatus } from '@/stores/recording-store'
 import { useLiveTranscriptStore } from '@/stores/live-transcript-store'
 import { useLiveDiarization } from '@/hooks/useLiveDiarization'
 import { cn } from '@/lib/utils'
-import { AlertCircle, X, Mic, Radio, Loader2, Users, Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
+import { AlertCircle, X, Mic, Radio, Loader2, Users, Sparkles, ChevronDown, ChevronUp, Bug } from 'lucide-react'
 import { SPEAKER_COLORS, parseSpeakerIndex, type SpeakerColorConfig } from './transcript/transcript-utils'
 import { LiveNotesPanel } from './recording/LiveNotesPanel'
+import { SpeakerDebugOverlay } from './recording/SpeakerDebugOverlay'
 import type { DiarizationFullSettings } from './SpeakerDiarizationSettings'
 
 interface RecordingControlsProps {
@@ -37,6 +38,8 @@ interface RecordingControlsProps {
   enableDiarization?: boolean
   /** Enable live notes generation (default: true) */
   enableLiveNotes?: boolean
+  /** Enable debug overlay for speaker timeline debugging (default: false) */
+  enableDebugOverlay?: boolean
 }
 
 /**
@@ -81,12 +84,14 @@ export function RecordingControls({
   className,
   meetingId,
   enableDiarization = true,
-  enableLiveNotes = true
+  enableLiveNotes = true,
+  enableDebugOverlay = false
 }: RecordingControlsProps) {
   const [displayDuration, setDisplayDuration] = useState(duration)
   const [simulatedAudioLevel, setSimulatedAudioLevel] = useState(0)
   const [showWarning, setShowWarning] = useState(true)
   const [showLiveNotes, setShowLiveNotes] = useState(true)
+  const [showDebugOverlay, setShowDebugOverlay] = useState(enableDebugOverlay)
   const [diarizationSettings, setDiarizationSettings] = useState<DiarizationFullSettings | null>(null)
   const transcriptScrollRef = useRef<HTMLDivElement>(null)
 
@@ -546,6 +551,38 @@ export function RecordingControls({
             />
           )}
         </div>
+      )}
+
+      {/* Debug Toggle Button - Only show during recording with diarization */}
+      {isRecording && enableDiarization && meetingId && (
+        <button
+          onClick={() => setShowDebugOverlay(!showDebugOverlay)}
+          className={cn(
+            'fixed bottom-4 left-4 z-40 flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium transition-all',
+            showDebugOverlay
+              ? 'bg-yellow-500 text-yellow-950 shadow-lg'
+              : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+          )}
+          data-testid="debug-overlay-toggle"
+          title="Toggle Speaker Debug Overlay"
+        >
+          <Bug className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Debug</span>
+        </button>
+      )}
+
+      {/* Speaker Debug Overlay */}
+      {isRecording && showDebugOverlay && (
+        <SpeakerDebugOverlay
+          visible={true}
+          position="bottom-right"
+          defaultExpanded={true}
+          onForceRefresh={() => {
+            // Force a re-render by toggling debug overlay
+            setShowDebugOverlay(false)
+            setTimeout(() => setShowDebugOverlay(true), 50)
+          }}
+        />
       )}
     </div>
   )

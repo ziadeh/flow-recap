@@ -1,8 +1,8 @@
 import { useRef, useEffect } from 'react'
-import { FileText, StickyNote, CheckSquare, Mic, Radio, LayoutDashboard } from 'lucide-react'
+import { FileText, StickyNote, CheckSquare, Mic, Radio, LayoutDashboard, BarChart3 } from 'lucide-react'
 
 // Note: 'insights' tab type kept for backwards compatibility but tab is removed from UI
-export type TabType = 'overview' | 'transcript' | 'notes' | 'tasks' | 'insights' | 'recordings'
+export type TabType = 'overview' | 'transcript' | 'notes' | 'tasks' | 'insights' | 'recordings' | 'analytics'
 
 interface TabNavigationProps {
   activeTab: TabType
@@ -36,6 +36,7 @@ const tabs: Tab[] = [
   { id: 'notes', label: 'Notes', icon: StickyNote },
   { id: 'tasks', label: 'Tasks', icon: CheckSquare },
   { id: 'recordings', label: 'Recordings', icon: Mic },
+  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
 ]
 
 export function TabNavigation({

@@ -107,6 +107,53 @@ export interface DiagnosticMessage {
 }
 
 // ============================================================================
+// Device Recommendation Types
+// ============================================================================
+
+export type RecommendationConfidence = 'high' | 'medium' | 'low'
+
+export interface DeviceRecommendation {
+  deviceId: string
+  deviceName: string
+  deviceType: AudioDeviceType
+  confidence: RecommendationConfidence
+  confidenceScore: number // 0.0 to 1.0 for precise confidence
+  reason: string
+  isVirtualCable: boolean
+  virtualCableType: VirtualCableType | null
+  isPrimary: boolean // Whether this is the primary recommendation for its category
+}
+
+export interface AudioSetupRecommendation {
+  // Primary recommendations (most common setup: system audio + microphone)
+  inputDevice: DeviceRecommendation | null
+  outputDevice: DeviceRecommendation | null
+  systemAudioDevice: DeviceRecommendation | null // Virtual cable for capturing system audio
+
+  // All detected virtual cables with their status
+  detectedVirtualCables: Array<{
+    device: AudioDevice
+    cableType: VirtualCableType
+    isRecommended: boolean
+    installationStatus: 'installed' | 'not_installed' | 'unknown'
+  }>
+
+  // Configuration confidence
+  overallConfidence: RecommendationConfidence
+  overallConfidenceScore: number
+
+  // Setup type description
+  setupType: 'complete' | 'microphone_only' | 'system_audio_only' | 'minimal' | 'none'
+  setupDescription: string
+
+  // Recommendations for improvement
+  suggestions: string[]
+
+  // Platform-specific notes
+  platformNotes: string | null
+}
+
+// ============================================================================
 // Platform-specific Detection Functions
 // ============================================================================
 
@@ -816,6 +863,434 @@ function determineOverallStatus(
 }
 
 // ============================================================================
+// Smart Device Recommendation Functions
+// ============================================================================
+
+/**
+ * Known microphone device name patterns that indicate quality input devices
+ */
+const PREFERRED_MICROPHONE_PATTERNS = [
+  /blue\s*yeti/i,
+  /rode/i,
+  /shure/i,
+  /audio-technica/i,
+  /at2020/i,
+  /at2035/i,
+  /elgato\s*wave/i,
+  /hyperx\s*(quadcast|solocast)/i,
+  /razer\s*seiren/i,
+  /fifine/i,
+  /samson/i,
+  /focusrite/i,
+  /scarlett/i,
+  /usb\s*microphone/i,
+  /condenser/i,
+  /podcast/i,
+  /streaming/i
+]
+
+/**
+ * Known virtual cable/loopback device patterns by platform
+ */
+const VIRTUAL_CABLE_PATTERNS: Record<NodeJS.Platform, RegExp[]> = {
+  darwin: [
+    /blackhole/i,
+    /soundflower/i,
+    /loopback/i,
+    /existential/i
+  ],
+  win32: [
+    /vb-?audio/i,
+    /cable\s*(input|output)/i,
+    /voicemeeter/i,
+    /virtual\s*audio/i,
+    /vac/i,
+    /hi-fi\s*cable/i
+  ],
+  linux: [
+    /virtual/i,
+    /null/i,
+    /loopback/i,
+    /monitor/i,
+    /pulse.*sink/i
+  ],
+  aix: [],
+  android: [],
+  freebsd: [],
+  haiku: [],
+  openbsd: [],
+  sunos: [],
+  cygwin: [],
+  netbsd: []
+}
+
+/**
+ * Known built-in/integrated microphone patterns (lower priority)
+ */
+const BUILTIN_MIC_PATTERNS = [
+  /built-?in/i,
+  /internal/i,
+  /integrated/i,
+  /macbook/i,
+  /laptop/i,
+  /webcam/i,
+  /facetime/i,
+  /realtek/i
+]
+
+/**
+ * Calculate confidence score for a microphone device
+ */
+function calculateMicrophoneConfidence(device: AudioDevice): { score: number; reason: string } {
+  let score = 0.5 // Base score
+  let reasons: string[] = []
+
+  // Check for preferred microphone patterns (high quality mics)
+  const isPreferredMic = PREFERRED_MICROPHONE_PATTERNS.some(pattern => pattern.test(device.name))
+  if (isPreferredMic) {
+    score += 0.3
+    reasons.push('recognized quality microphone')
+  }
+
+  // Check for built-in mic patterns (lower quality, lower score)
+  const isBuiltIn = BUILTIN_MIC_PATTERNS.some(pattern => pattern.test(device.name))
+  if (isBuiltIn) {
+    score -= 0.2
+    reasons.push('built-in microphone')
+  }
+
+  // Prefer USB devices (usually external mics)
+  if (/usb/i.test(device.name)) {
+    score += 0.1
+    reasons.push('USB connected')
+  }
+
+  // System default gets a small boost
+  if (device.isDefault) {
+    score += 0.1
+    reasons.push('system default')
+  }
+
+  // Clamp score between 0 and 1
+  score = Math.max(0, Math.min(1, score))
+
+  const reason = reasons.length > 0
+    ? reasons.join(', ')
+    : 'standard input device'
+
+  return { score, reason }
+}
+
+/**
+ * Calculate confidence score for a virtual cable device
+ */
+function calculateVirtualCableConfidence(device: AudioDevice, platform: NodeJS.Platform): { score: number; reason: string } {
+  let score = 0.7 // Base score for any detected virtual cable
+  let reasons: string[] = ['virtual audio cable detected']
+
+  const patterns = VIRTUAL_CABLE_PATTERNS[platform] || []
+
+  // Check for platform-recommended virtual cables
+  if (platform === 'darwin' && /blackhole/i.test(device.name)) {
+    score = 0.95
+    reasons = ['BlackHole is the recommended virtual cable for macOS']
+  } else if (platform === 'win32' && /vb-?audio|cable\s*(input|output)/i.test(device.name)) {
+    score = 0.95
+    reasons = ['VB-Audio Virtual Cable is the recommended solution for Windows']
+  } else if (platform === 'win32' && /voicemeeter/i.test(device.name)) {
+    score = 0.85
+    reasons = ['VoiceMeeter detected (professional audio routing)']
+  } else if (platform === 'linux' && /loopback/i.test(device.name)) {
+    score = 0.85
+    reasons = ['PulseAudio loopback device detected']
+  }
+
+  return { score, reason: reasons.join(', ') }
+}
+
+/**
+ * Calculate confidence score for an output device
+ */
+function calculateOutputConfidence(device: AudioDevice): { score: number; reason: string } {
+  let score = 0.5 // Base score
+  let reasons: string[] = []
+
+  // System default is usually the right choice
+  if (device.isDefault) {
+    score = 0.9
+    reasons.push('system default output')
+  }
+
+  // Check for known speaker brands
+  if (/speakers?|headphones?|airpods?|bose|sony|jbl|logitech/i.test(device.name)) {
+    score += 0.1
+    reasons.push('recognized audio device')
+  }
+
+  // Virtual cables shouldn't be primary output for playback
+  if (device.isVirtual) {
+    score -= 0.3
+    reasons.push('virtual device (not for direct playback)')
+  }
+
+  score = Math.max(0, Math.min(1, score))
+
+  return {
+    score,
+    reason: reasons.length > 0 ? reasons.join(', ') : 'standard output device'
+  }
+}
+
+/**
+ * Convert numeric confidence score to confidence level
+ */
+function scoreToConfidenceLevel(score: number): RecommendationConfidence {
+  if (score >= 0.8) return 'high'
+  if (score >= 0.5) return 'medium'
+  return 'low'
+}
+
+/**
+ * Generate smart device recommendations based on detected hardware
+ */
+async function generateDeviceRecommendations(): Promise<AudioSetupRecommendation> {
+  const platform = process.platform
+  const [allDevices, virtualCables] = await Promise.all([
+    getAudioDevices(),
+    detectVirtualCables()
+  ])
+
+  // Separate devices by type
+  const inputDevices = allDevices.filter(d => d.type === 'input')
+  const outputDevices = allDevices.filter(d => d.type === 'output')
+  const virtualDevices = allDevices.filter(d => d.isVirtual || d.type === 'virtual')
+
+  // Find best microphone
+  let bestMicrophone: DeviceRecommendation | null = null
+  let bestMicScore = 0
+
+  for (const device of inputDevices) {
+    // Skip virtual devices for microphone selection
+    if (device.isVirtual) continue
+
+    const { score, reason } = calculateMicrophoneConfidence(device)
+    if (score > bestMicScore) {
+      bestMicScore = score
+      bestMicrophone = {
+        deviceId: device.id,
+        deviceName: device.name,
+        deviceType: 'input',
+        confidence: scoreToConfidenceLevel(score),
+        confidenceScore: score,
+        reason,
+        isVirtualCable: false,
+        virtualCableType: null,
+        isPrimary: true
+      }
+    }
+  }
+
+  // Find best virtual cable for system audio capture
+  let bestVirtualCable: DeviceRecommendation | null = null
+  let bestVirtualScore = 0
+  const detectedVirtualCables: AudioSetupRecommendation['detectedVirtualCables'] = []
+
+  for (const device of virtualDevices) {
+    const { score, reason } = calculateVirtualCableConfidence(device, platform)
+
+    // Determine cable type
+    let cableType: VirtualCableType = 'unknown'
+    if (platform === 'darwin' && /blackhole/i.test(device.name)) {
+      cableType = 'blackhole'
+    } else if (platform === 'win32' && /vb-?audio|cable/i.test(device.name)) {
+      cableType = 'vb-audio'
+    } else if (platform === 'linux') {
+      cableType = 'pulseaudio-virtual'
+    }
+
+    const isRecommended = score > bestVirtualScore
+
+    detectedVirtualCables.push({
+      device,
+      cableType,
+      isRecommended,
+      installationStatus: 'installed'
+    })
+
+    if (score > bestVirtualScore) {
+      bestVirtualScore = score
+      bestVirtualCable = {
+        deviceId: device.id,
+        deviceName: device.name,
+        deviceType: 'virtual',
+        confidence: scoreToConfidenceLevel(score),
+        confidenceScore: score,
+        reason,
+        isVirtualCable: true,
+        virtualCableType: cableType,
+        isPrimary: true
+      }
+    }
+  }
+
+  // Also check virtual cables from the dedicated detection
+  for (const cable of virtualCables) {
+    if (cable.detected && cable.deviceId) {
+      const existingDevice = detectedVirtualCables.find(d => d.device.id === cable.deviceId)
+      if (!existingDevice) {
+        // Create a device entry for this cable
+        const virtualDevice: AudioDevice = {
+          id: cable.deviceId,
+          name: cable.name,
+          type: 'virtual',
+          isDefault: false,
+          isVirtual: true,
+          virtualCableType: cable.type
+        }
+
+        detectedVirtualCables.push({
+          device: virtualDevice,
+          cableType: cable.type,
+          isRecommended: bestVirtualCable === null,
+          installationStatus: cable.installationStatus
+        })
+
+        if (bestVirtualCable === null) {
+          bestVirtualCable = {
+            deviceId: cable.deviceId,
+            deviceName: cable.name,
+            deviceType: 'virtual',
+            confidence: 'high',
+            confidenceScore: 0.9,
+            reason: `${cable.name} detected and ready for system audio capture`,
+            isVirtualCable: true,
+            virtualCableType: cable.type,
+            isPrimary: true
+          }
+          bestVirtualScore = 0.9
+        }
+      }
+    }
+  }
+
+  // Find best output device
+  let bestOutput: DeviceRecommendation | null = null
+  let bestOutputScore = 0
+
+  for (const device of outputDevices) {
+    // Skip virtual devices for primary output
+    if (device.isVirtual) continue
+
+    const { score, reason } = calculateOutputConfidence(device)
+    if (score > bestOutputScore) {
+      bestOutputScore = score
+      bestOutput = {
+        deviceId: device.id,
+        deviceName: device.name,
+        deviceType: 'output',
+        confidence: scoreToConfidenceLevel(score),
+        confidenceScore: score,
+        reason,
+        isVirtualCable: false,
+        virtualCableType: null,
+        isPrimary: true
+      }
+    }
+  }
+
+  // Calculate overall confidence and setup type
+  const scores = [bestMicScore, bestVirtualScore, bestOutputScore].filter(s => s > 0)
+  const overallScore = scores.length > 0
+    ? scores.reduce((a, b) => a + b, 0) / scores.length
+    : 0
+
+  // Determine setup type
+  let setupType: AudioSetupRecommendation['setupType']
+  let setupDescription: string
+
+  if (bestMicrophone && bestVirtualCable) {
+    setupType = 'complete'
+    setupDescription = 'Complete setup detected: Microphone for voice capture and virtual cable for system audio.'
+  } else if (bestMicrophone && !bestVirtualCable) {
+    setupType = 'microphone_only'
+    setupDescription = 'Microphone detected but no virtual cable found. You can record your voice but not system audio.'
+  } else if (!bestMicrophone && bestVirtualCable) {
+    setupType = 'system_audio_only'
+    setupDescription = 'Virtual cable detected but no microphone found. You can capture system audio but not your voice.'
+  } else if (bestOutput) {
+    setupType = 'minimal'
+    setupDescription = 'Only output devices detected. Please connect a microphone to record.'
+  } else {
+    setupType = 'none'
+    setupDescription = 'No suitable audio devices detected. Please connect audio devices.'
+  }
+
+  // Generate improvement suggestions
+  const suggestions: string[] = []
+
+  if (!bestVirtualCable) {
+    const recommendedCable = getRecommendedVirtualCable()
+    switch (recommendedCable) {
+      case 'blackhole':
+        suggestions.push('Install BlackHole to capture system audio from meeting apps.')
+        break
+      case 'vb-audio':
+        suggestions.push('Install VB-Audio Virtual Cable to capture system audio from meeting apps.')
+        break
+      case 'pulseaudio-virtual':
+        suggestions.push('Create a PulseAudio virtual sink to capture system audio.')
+        break
+    }
+  }
+
+  if (!bestMicrophone) {
+    suggestions.push('Connect a microphone to record your voice during meetings.')
+  } else if (bestMicScore < 0.6) {
+    suggestions.push('Consider using an external microphone for better audio quality.')
+  }
+
+  if (bestVirtualCable && bestVirtualScore < 0.8) {
+    suggestions.push('Ensure your virtual audio cable is properly configured in your system audio settings.')
+  }
+
+  // Platform-specific notes
+  let platformNotes: string | null = null
+  switch (platform) {
+    case 'darwin':
+      if (bestVirtualCable) {
+        platformNotes = 'Tip: Create a Multi-Output Device in Audio MIDI Setup to hear audio while recording system sound.'
+      }
+      break
+    case 'win32':
+      if (bestVirtualCable) {
+        platformNotes = 'Tip: Set your meeting app to output to the virtual cable, then select it as input in FlowRecap.'
+      }
+      break
+    case 'linux':
+      platformNotes = 'Tip: Use pavucontrol to route audio between applications and virtual sinks.'
+      break
+  }
+
+  // Mark the recommended virtual cable
+  for (const vc of detectedVirtualCables) {
+    vc.isRecommended = bestVirtualCable?.deviceId === vc.device.id
+  }
+
+  return {
+    inputDevice: bestMicrophone,
+    outputDevice: bestOutput,
+    systemAudioDevice: bestVirtualCable,
+    detectedVirtualCables,
+    overallConfidence: scoreToConfidenceLevel(overallScore),
+    overallConfidenceScore: overallScore,
+    setupType,
+    setupDescription,
+    suggestions,
+    platformNotes
+  }
+}
+
+// ============================================================================
 // Audio Device Service Export
 // ============================================================================
 
@@ -834,6 +1309,13 @@ export const audioDeviceService = {
    * Get recommended virtual cable for current platform
    */
   getRecommendedVirtualCable,
+
+  /**
+   * Generate smart device recommendations based on detected hardware
+   * This analyzes all available devices and recommends the best configuration
+   * for recording meetings (microphone + system audio via virtual cable)
+   */
+  generateDeviceRecommendations,
 
   /**
    * Run full audio diagnostics

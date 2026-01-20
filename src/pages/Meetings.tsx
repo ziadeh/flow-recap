@@ -34,6 +34,7 @@ import { MeetingCardMetadataSkeleton } from '@/components/ui/MeetingCardMetadata
 import { ProgressBar } from '@/components/ui/ProgressBar'
 import { DeleteMeetingModal } from '@/components/DeleteMeetingModal'
 import { LazyLoadContainer } from '@/components/ui/LazyLoadContainer'
+import { MeetingsOnboardingCard } from '@/components/MeetingsOnboardingCard'
 
 // Utility Functions
 function formatDuration(seconds: number | null): string {
@@ -441,21 +442,26 @@ export function Meetings() {
       <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
         {isLoading ? (
           <MeetingListSkeleton count={5} />
+        ) : meetings.length === 0 ? (
+          // Show onboarding card when user has no meetings at all
+          <MeetingsOnboardingCard onStartRecording={() => navigate('/')} />
         ) : filteredMeetings.length === 0 ? (
-          <div className="p-12 text-center">
+          // Show simple "no results" message when filters don't match any meetings
+          <div className="p-12 text-center" data-testid="no-filtered-results">
             <FileText className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
             <h3 className="text-lg font-medium text-foreground mb-2">No meetings found</h3>
             <p className="text-muted-foreground mb-4">
-              {searchQuery || statusFilter !== 'all' || dateRange !== 'all'
-                ? 'Try adjusting your filters or search query'
-                : 'Start your first recording to see it here'}
+              Try adjusting your filters or search query
             </p>
             <button
-              onClick={() => navigate('/')}
+              onClick={() => {
+                setSearchQuery('')
+                setStatusFilter('all')
+                setDateRange('all')
+              }}
               className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-sm font-medium transition-colors"
             >
-              <Plus className="h-4 w-4" />
-              Start Recording
+              Clear Filters
             </button>
           </div>
         ) : (

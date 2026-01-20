@@ -46,7 +46,9 @@ export interface DiarizationUserSettings {
   enabled: boolean
   /** Whether to auto-queue post-meeting recovery on failure */
   autoRecovery: boolean
-  /** Similarity threshold for speaker detection (0.3-0.7) */
+  /** Similarity threshold for speaker detection (0.3-0.7)
+   * Lower values = more speakers detected (more sensitive to voice differences)
+   * Typical same-speaker similarity: 0.8-0.95, different speakers: 0.2-0.5 */
   similarityThreshold: number
   /** Maximum number of speakers to detect */
   maxSpeakers: number
@@ -115,7 +117,9 @@ interface ValidationCheck {
 const DEFAULT_SETTINGS: DiarizationUserSettings = {
   enabled: true,
   autoRecovery: true,
-  similarityThreshold: 0.4,
+  // FIXED: Lowered from 0.4 to 0.30 to prevent merging of distinct speakers
+  // (typical same-speaker similarity: 0.8-0.95, different speakers: 0.2-0.5)
+  similarityThreshold: 0.30,
   maxSpeakers: 10
 }
 

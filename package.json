@@ -57,6 +57,7 @@
     "test": "npx playwright test",
     "test:diarization": "npx playwright test tests/diarization/",
     "test:diarization:acceptance": "npx playwright test tests/diarization/acceptance.spec.ts",
+    "test:speaker-change": "npx playwright test tests/speaker-change-events.spec.ts",
     "test:llm-provider": "npx playwright test tests/llm-provider/",
     "test:llm-provider:abstraction": "npx playwright test tests/llm-provider/llm-provider-abstraction.spec.ts",
     "test:insights": "npx playwright test tests/insights/",

@@ -137,6 +137,7 @@ import {
   storageManagementService,
   exportDeleteService,
   speakerNameDetectionService,
+  speakerParticipationService,
   pythonEnvironmentValidator,
   pythonSetupService,
   pythonExecutionManager,
@@ -169,6 +170,7 @@ import type {
   DeletionOptions,
   CleanupCriteria,
   SpeakerNameDetectionConfig,
+  ParticipationReportOptions,
   SetupOptions,
   SetupProgress
 } from './services'
@@ -634,6 +636,9 @@ app.whenReady().then(async () => {
   // Set up IPC handlers for streaming diarization (real-time speaker detection)
   setupStreamingDiarizationIPC()
 
+  // Set up IPC handlers for diarization debug service
+  await setupDiarizationDebugIPC()
+
   // Set up IPC handlers for diarization failure service (explicit failure detection)
   await setupDiarizationFailureIPC()
 
@@ -908,6 +913,28 @@ function setupDatabaseIPC() {
 
   ipcMain.handle('db:speakers:getUser', () => {
     return speakerService.getUser()
+  })
+
+  // ===== Speaker Participation Analytics Handlers =====
+  ipcMain.handle('speakerParticipation:getMeetingParticipation', (_event, meetingId: string) => {
+    return speakerParticipationService.getMeetingParticipation(meetingId)
+  })
+
+  ipcMain.handle('speakerParticipation:getQuickStats', (_event, meetingId: string) => {
+    return speakerParticipationService.getQuickStats(meetingId)
+  })
+
+  ipcMain.handle('speakerParticipation:getTrends', (
+    _event,
+    startDate: string,
+    endDate: string,
+    grouping?: 'day' | 'week' | 'month'
+  ) => {
+    return speakerParticipationService.getTrends(startDate, endDate, grouping)
+  })
+
+  ipcMain.handle('speakerParticipation:generateReport', (_event, options?: ParticipationReportOptions) => {
+    return speakerParticipationService.generateReport(options)
   })
 
   // ===== Meeting Speaker Names Handlers =====
@@ -1328,6 +1355,11 @@ function setupAudioDeviceIPC() {
   // Attempt to auto-fix common audio issues
   ipcMain.handle('audio:devices:attemptAutoFix', async (_event, issue: string) => {
     return audioDeviceService.attemptAutoFix(issue)
+  })
+
+  // Generate smart device recommendations based on detected hardware
+  ipcMain.handle('audio:devices:getRecommendations', async () => {
+    return audioDeviceService.generateDeviceRecommendations()
   })
 }
 
@@ -2027,6 +2059,57 @@ function setupStreamingDiarizationIPC() {
     console.log('[Main] streamingDiarization:forceReset')
     return streamingDiarizationService.forceReset()
   })
+}
+
+// ============================================================================
+// Diarization Debug Service IPC Handlers
+// ============================================================================
+
+async function setupDiarizationDebugIPC() {
+  const { diarizationDebugService } = await import('./services/diarizationDebugService')
+
+  // Get debug snapshot
+  ipcMain.handle('diarizationDebug:getSnapshot', async () => {
+    return diarizationDebugService.getSnapshot()
+  })
+
+  // Enable debug logging
+  ipcMain.handle('diarizationDebug:enable', async () => {
+    diarizationDebugService.enable()
+    return { success: true }
+  })
+
+  // Disable debug logging
+  ipcMain.handle('diarizationDebug:disable', async () => {
+    diarizationDebugService.disable()
+    return { success: true }
+  })
+
+  // Check if debug is enabled
+  ipcMain.handle('diarizationDebug:isEnabled', async () => {
+    return diarizationDebugService.isDebugEnabled()
+  })
+
+  // Subscribe to debug events (send to renderer when snapshot updates)
+  diarizationDebugService.on('segment:received', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      diarizationDebugService.sendSnapshotToRenderer()
+    }
+  })
+
+  diarizationDebugService.on('speaker:change', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      diarizationDebugService.sendSnapshotToRenderer()
+    }
+  })
+
+  diarizationDebugService.on('status:change', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      diarizationDebugService.sendSnapshotToRenderer()
+    }
+  })
+
+  console.log('[Main] Diarization debug IPC handlers registered')
 }
 
 // ============================================================================
@@ -3040,6 +3123,276 @@ function setupModelManagerIPC() {
       }
     }
   })
+
+  // ============================================================================
+  // Delta Model Updates API (Content-addressed storage and incremental updates)
+  // ============================================================================
+
+  // Initialize delta model services
+  ipcMain.handle('deltaModels:initialize', async () => {
+    console.log('[Main] deltaModels:initialize')
+    try {
+      const { deltaModelStorage } = await import('./services/deltaModelStorage')
+      const { deltaDownloadManager } = await import('./services/deltaDownloadManager')
+      const { modelUpdateScheduler } = await import('./services/modelUpdateScheduler')
+
+      await deltaModelStorage.initialize()
+      await deltaDownloadManager.initialize()
+      await modelUpdateScheduler.initialize()
+
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Error initializing delta model services:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Check for model updates
+  ipcMain.handle('deltaModels:checkUpdates', async () => {
+    console.log('[Main] deltaModels:checkUpdates')
+    try {
+      const { modelUpdateScheduler } = await import('./services/modelUpdateScheduler')
+      return await modelUpdateScheduler.checkForUpdates()
+    } catch (err) {
+      console.error('[Main] Error checking for model updates:', err)
+      return {
+        checkedAt: Date.now(),
+        updates: [],
+        totalDownloadSize: 0,
+        hasRequiredUpdates: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Get scheduler state
+  ipcMain.handle('deltaModels:getSchedulerState', async () => {
+    console.log('[Main] deltaModels:getSchedulerState')
+    try {
+      const { modelUpdateScheduler } = await import('./services/modelUpdateScheduler')
+      return modelUpdateScheduler.getState()
+    } catch (err) {
+      console.error('[Main] Error getting scheduler state:', err)
+      return null
+    }
+  })
+
+  // Get scheduler config
+  ipcMain.handle('deltaModels:getSchedulerConfig', async () => {
+    console.log('[Main] deltaModels:getSchedulerConfig')
+    try {
+      const { modelUpdateScheduler } = await import('./services/modelUpdateScheduler')
+      return modelUpdateScheduler.getConfig()
+    } catch (err) {
+      console.error('[Main] Error getting scheduler config:', err)
+      return null
+    }
+  })
+
+  // Update scheduler config
+  ipcMain.handle('deltaModels:updateSchedulerConfig', async (_event, config: any) => {
+    console.log('[Main] deltaModels:updateSchedulerConfig')
+    try {
+      const { modelUpdateScheduler } = await import('./services/modelUpdateScheduler')
+      await modelUpdateScheduler.updateConfig(config)
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Error updating scheduler config:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Get download queue
+  ipcMain.handle('deltaModels:getDownloadQueue', async () => {
+    console.log('[Main] deltaModels:getDownloadQueue')
+    try {
+      const { deltaDownloadManager } = await import('./services/deltaDownloadManager')
+      return deltaDownloadManager.getQueue()
+    } catch (err) {
+      console.error('[Main] Error getting download queue:', err)
+      return []
+    }
+  })
+
+  // Queue model updates for download
+  ipcMain.handle('deltaModels:queueUpdates', async (_event, updates: any[]) => {
+    console.log('[Main] deltaModels:queueUpdates')
+    try {
+      const { modelUpdateScheduler } = await import('./services/modelUpdateScheduler')
+      await modelUpdateScheduler.queueUpdates(updates)
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Error queueing updates:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Pause a download
+  ipcMain.handle('deltaModels:pauseDownload', async (_event, queueId: string) => {
+    console.log('[Main] deltaModels:pauseDownload', queueId)
+    try {
+      const { deltaDownloadManager } = await import('./services/deltaDownloadManager')
+      await deltaDownloadManager.pauseDownload(queueId)
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Error pausing download:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Resume a download
+  ipcMain.handle('deltaModels:resumeDownload', async (_event, queueId: string) => {
+    console.log('[Main] deltaModels:resumeDownload', queueId)
+    try {
+      const { deltaDownloadManager } = await import('./services/deltaDownloadManager')
+      await deltaDownloadManager.resumeDownload(queueId)
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Error resuming download:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Cancel a download
+  ipcMain.handle('deltaModels:cancelDownload', async (_event, queueId: string) => {
+    console.log('[Main] deltaModels:cancelDownload', queueId)
+    try {
+      const { deltaDownloadManager } = await import('./services/deltaDownloadManager')
+      await deltaDownloadManager.cancelDownload(queueId)
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Error cancelling download:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Get storage statistics
+  ipcMain.handle('deltaModels:getStorageStats', async () => {
+    console.log('[Main] deltaModels:getStorageStats')
+    try {
+      const { deltaModelStorage } = await import('./services/deltaModelStorage')
+      return await deltaModelStorage.getStorageStats()
+    } catch (err) {
+      console.error('[Main] Error getting storage stats:', err)
+      return {
+        totalChunks: 0,
+        totalSize: 0,
+        uniqueChunks: 0,
+        deduplicatedSize: 0,
+        modelCount: 0,
+        versionCount: 0
+      }
+    }
+  })
+
+  // Cleanup unused chunks
+  ipcMain.handle('deltaModels:cleanupChunks', async () => {
+    console.log('[Main] deltaModels:cleanupChunks')
+    try {
+      const { deltaModelStorage } = await import('./services/deltaModelStorage')
+      return await deltaModelStorage.cleanupUnusedChunks()
+    } catch (err) {
+      console.error('[Main] Error cleaning up chunks:', err)
+      return {
+        deletedChunks: 0,
+        freedBytes: 0
+      }
+    }
+  })
+
+  // Enable scheduler
+  ipcMain.handle('deltaModels:enableScheduler', async () => {
+    console.log('[Main] deltaModels:enableScheduler')
+    try {
+      const { modelUpdateScheduler } = await import('./services/modelUpdateScheduler')
+      modelUpdateScheduler.enable()
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Error enabling scheduler:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Disable scheduler
+  ipcMain.handle('deltaModels:disableScheduler', async () => {
+    console.log('[Main] deltaModels:disableScheduler')
+    try {
+      const { modelUpdateScheduler } = await import('./services/modelUpdateScheduler')
+      modelUpdateScheduler.disable()
+      return { success: true }
+    } catch (err) {
+      console.error('[Main] Error disabling scheduler:', err)
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+
+  // Set up event forwarding for delta model updates
+  // Wrapped in async IIFE since createWindow is not async
+  // Note: The semicolon before the IIFE is required to prevent ASI issues
+  ;(async () => {
+    try {
+      const { deltaDownloadManager } = await import('./services/deltaDownloadManager')
+      const { modelUpdateScheduler } = await import('./services/modelUpdateScheduler')
+
+      // Forward download progress events
+      deltaDownloadManager.on('download-progress', (progress: any) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('deltaModels:downloadProgress', progress)
+        }
+      })
+
+      deltaDownloadManager.on('download-complete', (data: any) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('deltaModels:downloadComplete', data)
+        }
+      })
+
+      deltaDownloadManager.on('download-error', (data: any) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('deltaModels:downloadError', data)
+        }
+      })
+
+      // Forward scheduler state changes
+      modelUpdateScheduler.on('scheduler-state-change', (state: any) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('deltaModels:schedulerStateChange', state)
+        }
+      })
+
+      modelUpdateScheduler.on('update-check-complete', (result: any) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('deltaModels:updateCheckComplete', result)
+        }
+      })
+    } catch (err) {
+      console.debug('[Main] Delta model event forwarding setup deferred:', err)
+    }
+  })()
 
   // ============================================================================
   // LLM Post-Processing API (LM Studio-based speaker consistency)

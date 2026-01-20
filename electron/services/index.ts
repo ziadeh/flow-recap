@@ -247,6 +247,17 @@ export type {
   RetroactiveCorrectionEvent
 } from './streamingDiarizationService'
 
+// Diarization Debug service (comprehensive debug logging for diagnosing speaker detection issues)
+export { diarizationDebugService, DiarizationDebugService } from './diarizationDebugService'
+export type {
+  AudioChunkMetrics,
+  SpeakerSegmentDebug,
+  SpeakerChangeDebug,
+  IPCEventDebug,
+  PyAnnoteOutputDebug,
+  DebugSnapshot
+} from './diarizationDebugService'
+
 // Diarization Failure Service (explicit failure detection and user notification)
 export { diarizationFailureService, DIARIZATION_FAILURE_MESSAGE as EXPLICIT_FAILURE_MESSAGE } from './diarizationFailureService'
 export type {
@@ -653,6 +664,12 @@ export {
   DEFAULT_SPEAKER_NAME_DETECTION_CONFIG
 } from './speakerNameDetectionService'
 
+// Speaker Participation Analytics Service (talk time distribution and participation metrics)
+export {
+  speakerParticipationService,
+  resetSpeakerParticipationStatements
+} from './speakerParticipationService'
+
 // Data Migration Service (legacy data migration for rebranding)
 export { dataMigrationService } from './dataMigrationService'
 export type {
@@ -807,7 +824,15 @@ export type {
   SpeakerNameDetectionConfig,
   SpeakerNameSuggestion,
   MeetingSpeakerNameSummary,
-  SpeakerNameDetectionAPI
+  SpeakerNameDetectionAPI,
+  // Speaker Participation Analytics types
+  SpeakerParticipation,
+  MeetingParticipationAnalytics,
+  ParticipationTrend,
+  ParticipationReport,
+  ParticipationReportOptions,
+  ParticipationInsight,
+  SpeakerParticipationAPI
 } from '../../src/types/database'
 
 /**
@@ -848,3 +873,51 @@ export function closeDatabase(): void {
   resetAllStatements()
   getDbService().close()
 }
+
+// Delta Model Storage Service (content-addressed storage for model chunks)
+export { deltaModelStorage, DeltaModelStorageService } from './deltaModelStorage'
+
+// Delta Download Manager Service (handles delta/incremental model downloads)
+export { deltaDownloadManager, DeltaDownloadManagerService } from './deltaDownloadManager'
+
+// Model Update Scheduler Service (background scheduling for model updates)
+export { modelUpdateScheduler, ModelUpdateSchedulerService } from './modelUpdateScheduler'
+
+// Export delta model types
+export type {
+  // Chunk and Storage Types
+  CompressionType,
+  ChunkStatus,
+  ChunkMetadata,
+  StoredChunk,
+  // Manifest Types
+  DeltaInfo,
+  ManifestChunk,
+  ModelVersionInfo,
+  ModelManifest,
+  ModelDeltaRegistry,
+  // Download Types
+  DownloadPhase,
+  DownloadPriority,
+  DeltaPlan,
+  ChunkDownloadProgress,
+  ModelDownloadProgress,
+  DownloadQueueItem,
+  // Scheduler Types
+  SchedulerStatus,
+  PauseReason,
+  SchedulerConfig,
+  SchedulerState,
+  ModelUpdateInfo,
+  ModelUpdateCheckResult,
+  // Configuration Types
+  DeltaStorageConfig,
+  DeltaDownloadConfig,
+  // Database Record Types
+  ModelChunkRecord,
+  ModelManifestRecord,
+  ModelUpdateQueueRecord,
+  ChunkDeduplicationRecord,
+  // Event Types
+  DeltaModelEvents
+} from '../types/deltaModels'

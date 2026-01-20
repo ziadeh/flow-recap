@@ -1156,25 +1156,81 @@ export function SpeakerDiarizationSettings({
         </button>
 
         {expandedSections.has('clustering') && (
-          <div className="p-4 border-t border-border">
+          <div className="p-4 border-t border-border space-y-4">
+            {/* Clustering Profile Quick Select */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Quick Profile Selection</p>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: 'conservative', label: 'Conservative', desc: 'Fewer speakers, high confidence', threshold: 0.50 },
+                  { id: 'balanced', label: 'Balanced', desc: 'Default for most scenarios', threshold: 0.35 },
+                  { id: 'sensitive', label: 'Sensitive', desc: 'More speakers detected', threshold: 0.30 },
+                  { id: 'very_sensitive', label: 'Very Sensitive', desc: 'Maximum separation', threshold: 0.25 }
+                ].map((profile) => (
+                  <button
+                    key={profile.id}
+                    onClick={() => updateSetting('clusteringSensitivity', profile.threshold)}
+                    disabled={isSaving || !settings.enabled}
+                    className={cn(
+                      'p-2 rounded-lg border text-left text-xs transition-all',
+                      Math.abs(settings.clusteringSensitivity - profile.threshold) < 0.01
+                        ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
+                        : 'border-border hover:border-purple-300 hover:bg-accent/50',
+                      (isSaving || !settings.enabled) && 'opacity-50 cursor-not-allowed'
+                    )}
+                    data-testid={`clustering-profile-${profile.id}`}
+                  >
+                    <p className="font-medium">{profile.label}</p>
+                    <p className="text-muted-foreground text-[10px]">{profile.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Explanation Box */}
+            <div className="p-3 bg-muted/50 rounded-lg text-xs space-y-2">
+              <p className="font-medium text-foreground">Understanding Clustering Threshold</p>
+              <ul className="space-y-1 text-muted-foreground">
+                <li>• <strong>Lower values (0.25-0.35):</strong> More sensitive, detects more distinct speakers</li>
+                <li>• <strong>Higher values (0.50-0.70):</strong> More strict, may merge similar voices</li>
+                <li>• <strong>If speakers are being merged:</strong> Try "Sensitive" or lower threshold</li>
+                <li>• <strong>If too many speakers detected:</strong> Try "Conservative" or higher threshold</li>
+              </ul>
+            </div>
+
             <SettingRow
               label="Speaker Similarity Threshold"
-              description="Lower = more likely to merge similar voices. Higher = more likely to split into separate speakers."
+              description="Fine-tune: Lower = merge similar voices. Higher = split into separate speakers."
             >
               <Slider
                 value={settings.clusteringSensitivity}
-                min={0.3}
-                max={0.7}
+                min={0.25}
+                max={0.70}
                 step={0.05}
                 onChange={(value) => updateSetting('clusteringSensitivity', value)}
                 disabled={isSaving || !settings.enabled}
               />
             </SettingRow>
 
-            <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-              <span>Merge voices</span>
-              <span>Split voices</span>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>More speakers (0.25)</span>
+              <span className="font-medium">Current: {settings.clusteringSensitivity.toFixed(2)}</span>
+              <span>Fewer speakers (0.70)</span>
             </div>
+
+            {/* Threshold Recommendation */}
+            {settings.clusteringSensitivity < 0.30 && (
+              <div className="p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded text-xs text-yellow-700 dark:text-yellow-300">
+                <AlertTriangle className="w-3 h-3 inline mr-1" />
+                Very sensitive threshold may cause over-splitting of speakers.
+              </div>
+            )}
+            {settings.clusteringSensitivity > 0.55 && (
+              <div className="p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-xs text-blue-700 dark:text-blue-300">
+                <Info className="w-3 h-3 inline mr-1" />
+                Strict threshold helps if speakers are being merged into one cluster.
+              </div>
+            )}
           </div>
         )}
       </div>

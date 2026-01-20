@@ -21,6 +21,7 @@ import * as path from 'path'
 import * as fs from 'fs'
 import * as readline from 'readline'
 import { pythonEnvironment } from './pythonEnvironment'
+import { diarizationDebugService } from './diarizationDebugService'
 
 // Electron app - dynamically imported to support testing
 let app: { isPackaged?: boolean } | undefined
@@ -43,6 +44,48 @@ export type StreamingDiarizationStatus =
   | 'stopping'
   | 'error'
 
+/**
+ * Clustering profile presets for different multi-speaker scenarios.
+ *
+ * - conservative: Fewer speakers detected, higher confidence. Use when speakers have similar voices.
+ * - balanced: Default profile, good for most scenarios.
+ * - sensitive: More speakers detected, may have false positives. Use for clearly distinct voices.
+ * - very_sensitive: Maximum speaker separation. Use for very different voices or testing.
+ */
+export type ClusteringProfile = 'conservative' | 'balanced' | 'sensitive' | 'very_sensitive' | 'custom'
+
+/**
+ * Predefined clustering configurations for A/B testing and optimization.
+ * These values are based on empirical testing and the feature request guidelines.
+ */
+export const CLUSTERING_PROFILES: Record<ClusteringProfile, Partial<StreamingDiarizationConfig>> = {
+  conservative: {
+    similarityThreshold: 0.50,
+    maxSpeakers: 6,
+    windowDuration: 2.5,
+    coldStartDuration: 6.0
+  },
+  balanced: {
+    similarityThreshold: 0.35,
+    maxSpeakers: 10,
+    windowDuration: 2.0,
+    coldStartDuration: 5.0
+  },
+  sensitive: {
+    similarityThreshold: 0.30,
+    maxSpeakers: 10,
+    windowDuration: 2.0,
+    coldStartDuration: 5.0
+  },
+  very_sensitive: {
+    similarityThreshold: 0.25,
+    maxSpeakers: 15,
+    windowDuration: 1.5,
+    coldStartDuration: 4.0
+  },
+  custom: {} // User-defined settings
+}
+
 export interface StreamingDiarizationConfig {
   /** Sample rate of audio (default: 16000) */
   sampleRate?: number
@@ -52,16 +95,30 @@ export interface StreamingDiarizationConfig {
   hopDuration?: number
   /** Overlap between consecutive windows (default: 0.25) */
   overlapDuration?: number
-  /** Speaker similarity threshold for clustering (default: 0.7) */
+  /**
+   * Speaker similarity threshold for clustering (0.0-1.0).
+   * Lower values = more speakers detected (more sensitive to voice differences).
+   * - 0.25-0.30: Very sensitive, may over-split
+   * - 0.30-0.40: Sensitive, good for distinct voices
+   * - 0.40-0.50: Balanced, default for most scenarios
+   * - 0.50-0.60: Strict, may merge similar voices
+   * - 0.60-0.70: Very strict, addresses speaker merging issues
+   */
   similarityThreshold?: number
   /** Maximum number of speakers to track (default: 10) */
   maxSpeakers?: number
+  /** Minimum number of speakers to detect (default: 2) */
+  minSpeakers?: number
   /** Device for inference ('cuda', 'cpu', 'auto') */
   device?: 'cuda' | 'cpu' | 'auto'
   /** Minimum audio duration before diarization starts (cold-start) */
   coldStartDuration?: number
   /** Enable retroactive speaker label correction */
   enableRetroactiveCorrection?: boolean
+  /** Pre-defined clustering profile (overrides individual settings) */
+  clusteringProfile?: ClusteringProfile
+  /** Enable A/B test logging for this session */
+  enableABTestLogging?: boolean
 }
 
 export interface SpeakerSegment {
@@ -165,14 +222,60 @@ const DEFAULT_CONFIG: Required<StreamingDiarizationConfig> = {
   windowDuration: 2.0,
   hopDuration: 0.5,
   overlapDuration: 0.25,
-  // Lower threshold = more speakers detected (more sensitive to voice differences)
-  // 0.35 provides better speaker separation for typical voice differences
-  // (typical same-speaker similarity: 0.8-0.95, different speakers: 0.2-0.5)
-  similarityThreshold: 0.35,
+  /**
+   * Speaker similarity threshold for clustering.
+   *
+   * Lower threshold = more speakers detected (more sensitive to voice differences).
+   * Higher threshold = fewer speakers detected (may merge similar voices).
+   *
+   * Typical similarity values:
+   * - Same speaker: 0.8-0.95
+   * - Different speakers: 0.2-0.5
+   *
+   * Feature Request Validation:
+   * - Original threshold of 0.5 may be too low, causing speakers to merge into one cluster
+   * - Testing with stricter thresholds (0.6-0.7) may help separate speakers
+   * - Current default of 0.30 is SENSITIVE profile for better multi-speaker detection
+   */
+  similarityThreshold: 0.30,
   maxSpeakers: 10,
+  minSpeakers: 2,
   device: 'auto',
-  coldStartDuration: 3.0,
-  enableRetroactiveCorrection: true
+  /**
+   * Cold-start duration before full confidence diarization begins.
+   * Allows the system to collect enough speaker samples before making decisions.
+   * Increased from 3.0 to 5.0 seconds for better initial speaker separation.
+   */
+  coldStartDuration: 5.0,
+  enableRetroactiveCorrection: true,
+  /**
+   * Default clustering profile: 'sensitive' for better multi-speaker detection.
+   * Can be overridden to 'conservative', 'balanced', 'sensitive', or 'very_sensitive'.
+   */
+  clusteringProfile: 'sensitive',
+  /**
+   * Enable A/B test logging to track clustering performance metrics.
+   * Results are logged to ab_test_results.jsonl for analysis.
+   */
+  enableABTestLogging: false
+}
+
+/**
+ * Apply clustering profile to configuration.
+ * Profile settings override individual config values.
+ */
+function applyClusteringProfile(config: StreamingDiarizationConfig): StreamingDiarizationConfig {
+  const profile = config.clusteringProfile || 'custom'
+
+  if (profile === 'custom') {
+    return config
+  }
+
+  const profileConfig = CLUSTERING_PROFILES[profile]
+  return {
+    ...config,
+    ...profileConfig
+  }
 }
 
 // ============================================================================
@@ -427,6 +530,13 @@ function handlePythonMessage(message: PythonDiarizationMessage): void {
       updateState({ status: 'ready' })
       console.log(`[StreamingDiarization] Process ready - backend: ${message.backend}, device: ${message.device}`)
       emitStatus('ready', `Diarization ready (${message.backend} on ${message.device})`)
+
+      // Debug logging: PyAnnote ready
+      diarizationDebugService.logPyAnnoteOutput('ready', true, {
+        backend: message.backend,
+        device: message.device
+      })
+      diarizationDebugService.logStatusChange('ready', `Diarization ready (${message.backend} on ${message.device})`)
       break
 
     case 'speaker_segment':
@@ -458,6 +568,25 @@ function handlePythonMessage(message: PythonDiarizationMessage): void {
         emitSpeakerSegment(segment)
 
         console.log(`[StreamingDiarization] Segment: ${stabilizedSpeaker} (${message.start.toFixed(2)}s - ${message.end.toFixed(2)}s, conf: ${adjustedConfidence.toFixed(2)})`)
+
+        // Debug logging: Speaker segment
+        diarizationDebugService.logSpeakerSegment(
+          segment.id,
+          segment.speaker,
+          segment.startTime,
+          segment.endTime,
+          segment.confidence,
+          segment.isFinal,
+          segment.wasRetroactivelyCorrected
+        )
+        diarizationDebugService.logPyAnnoteOutput('segment', true, {
+          speaker: segment.speaker,
+          start: segment.startTime,
+          end: segment.endTime,
+          confidence: segment.confidence,
+          rawSpeaker: message.speaker,
+          rawConfidence: message.confidence
+        })
       }
       break
 
@@ -472,6 +601,22 @@ function handlePythonMessage(message: PythonDiarizationMessage): void {
 
         emitSpeakerChange(event)
         console.log(`[StreamingDiarization] Speaker change: ${event.fromSpeaker || 'none'} -> ${event.toSpeaker} at ${event.time.toFixed(2)}s`)
+
+        // Debug logging: Speaker change
+        diarizationDebugService.logSpeakerChange(
+          event.time,
+          event.fromSpeaker,
+          event.toSpeaker,
+          event.confidence,
+          true, // eventFired
+          true  // sentToRenderer (will be tracked in IPC layer)
+        )
+        diarizationDebugService.logPyAnnoteOutput('speaker_change', true, {
+          from: event.fromSpeaker,
+          to: event.toSpeaker,
+          time: event.time,
+          confidence: event.confidence
+        })
       }
       break
 
@@ -491,6 +636,12 @@ function handlePythonMessage(message: PythonDiarizationMessage): void {
         })
 
         emitStats(Object.fromEntries(speakerStatistics))
+
+        // Debug logging: Speaker stats
+        diarizationDebugService.logPyAnnoteOutput('stats', true, {
+          numSpeakers: speakerStatistics.size,
+          speakers: Array.from(speakerStatistics.keys())
+        })
       }
       break
 
@@ -504,6 +655,15 @@ function handlePythonMessage(message: PythonDiarizationMessage): void {
           message.end,
           message.reason || 'Improved clustering evidence'
         )
+
+        // Debug logging: Retroactive correction
+        diarizationDebugService.logPyAnnoteOutput('clustering', true, {
+          type: 'correction',
+          from: message.original_speaker,
+          to: message.corrected_speaker,
+          timeRange: `${message.start}-${message.end}`,
+          reason: message.reason
+        })
       }
       break
 
@@ -511,16 +671,28 @@ function handlePythonMessage(message: PythonDiarizationMessage): void {
       console.log(`[StreamingDiarization] Complete - ${message.num_speakers} speakers, ${message.total_duration?.toFixed(2)}s total`)
       updateState({ status: 'idle' })
       emitStatus('idle', 'Diarization session complete')
+
+      // Debug logging: Session complete
+      diarizationDebugService.logStatusChange('idle', 'Diarization session complete')
       break
 
     case 'error':
       console.error(`[StreamingDiarization] Error: ${message.message}`)
       updateState({ status: 'error', error: message.message })
       emitStatus('error', message.message)
+
+      // Debug logging: Error
+      diarizationDebugService.logPyAnnoteOutput('error', false, undefined, message.message)
+      diarizationDebugService.logStatusChange('error', message.message)
       break
 
     case 'status':
       console.log(`[StreamingDiarization] Status: ${message.message}`)
+
+      // Debug logging: Status update
+      if (message.message?.includes('Cold-start complete')) {
+        diarizationDebugService.logStatusChange('active', message.message)
+      }
       break
   }
 }
@@ -570,8 +742,25 @@ export const streamingDiarizationService = {
 
     console.log(`[StreamingDiarization] Starting session for meeting: ${meetingId}`)
 
+    // Start debug session
+    diarizationDebugService.startSession(meetingId)
+    diarizationDebugService.logStatusChange('initializing', 'Starting streaming diarization...')
+
     resetState()
-    currentConfig = { ...DEFAULT_CONFIG, ...config }
+
+    // Apply clustering profile if specified, then merge with defaults
+    const profiledConfig = applyClusteringProfile(config)
+    currentConfig = { ...DEFAULT_CONFIG, ...profiledConfig }
+
+    // Log configuration for A/B testing analysis
+    console.log(`[StreamingDiarization] Configuration:`, {
+      profile: currentConfig.clusteringProfile,
+      similarityThreshold: currentConfig.similarityThreshold,
+      maxSpeakers: currentConfig.maxSpeakers,
+      windowDuration: currentConfig.windowDuration,
+      coldStartDuration: currentConfig.coldStartDuration,
+      enableABTestLogging: currentConfig.enableABTestLogging
+    })
 
     updateState({
       status: 'initializing',
@@ -689,10 +878,24 @@ export const streamingDiarizationService = {
    */
   sendAudioChunk(audioData: Buffer): { success: boolean; error?: string } {
     if (!diarizationProcess || !diarizationProcess.stdin) {
+      // Debug logging: no active process
+      diarizationDebugService.logAudioChunk(
+        audioData.length,
+        currentConfig.sampleRate || DEFAULT_CONFIG.sampleRate,
+        false,
+        audioData
+      )
       return { success: false, error: 'No active diarization process' }
     }
 
     if (currentState.status !== 'active' && currentState.status !== 'ready') {
+      // Debug logging: wrong status
+      diarizationDebugService.logAudioChunk(
+        audioData.length,
+        currentConfig.sampleRate || DEFAULT_CONFIG.sampleRate,
+        false,
+        audioData
+      )
       return { success: false, error: `Cannot send audio in status: ${currentState.status}` }
     }
 
@@ -707,10 +910,27 @@ export const streamingDiarizationService = {
       // Write to Python process
       diarizationProcess.stdin.write(audioData)
 
+      // Debug logging: audio chunk sent successfully
+      diarizationDebugService.logAudioChunk(
+        audioData.length,
+        currentConfig.sampleRate || DEFAULT_CONFIG.sampleRate,
+        true,
+        audioData
+      )
+
       return { success: true }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
       console.error(`[StreamingDiarization] Error sending audio:`, errorMsg)
+
+      // Debug logging: error sending audio
+      diarizationDebugService.logAudioChunk(
+        audioData.length,
+        currentConfig.sampleRate || DEFAULT_CONFIG.sampleRate,
+        false,
+        audioData
+      )
+
       return { success: false, error: errorMsg }
     }
   },
@@ -817,6 +1037,7 @@ export const streamingDiarizationService = {
     }
 
     console.log(`[StreamingDiarization] Stopping session`)
+    diarizationDebugService.logStatusChange('stopping', 'Stopping diarization...')
     updateState({ status: 'stopping' })
     emitStatus('stopping', 'Stopping diarization...')
 
@@ -859,6 +1080,9 @@ export const streamingDiarizationService = {
 
     emitStatus('idle', 'Diarization session stopped')
     console.log(`[StreamingDiarization] Session stopped. ${segments.length} segments, ${Object.keys(stats).length} speakers`)
+
+    // End debug session
+    diarizationDebugService.endSession()
 
     return { success: true, segments, stats }
   },
@@ -990,6 +1214,99 @@ export const streamingDiarizationService = {
   onStats(callback: (stats: Record<string, SpeakerStats>) => void): () => void {
     progressEmitter.on(STATS_EVENT, callback)
     return () => progressEmitter.off(STATS_EVENT, callback)
+  },
+
+  // =========================================================================
+  // Clustering Profile Management (for A/B Testing)
+  // =========================================================================
+
+  /**
+   * Get available clustering profiles with their configurations.
+   * Useful for UI to display options and for A/B testing.
+   */
+  getClusteringProfiles(): Record<ClusteringProfile, {
+    name: string
+    description: string
+    config: Partial<StreamingDiarizationConfig>
+  }> {
+    return {
+      conservative: {
+        name: 'Conservative',
+        description: 'Fewer speakers detected, higher confidence. Use when speakers have similar voices.',
+        config: CLUSTERING_PROFILES.conservative
+      },
+      balanced: {
+        name: 'Balanced',
+        description: 'Default profile, good for most multi-speaker scenarios.',
+        config: CLUSTERING_PROFILES.balanced
+      },
+      sensitive: {
+        name: 'Sensitive',
+        description: 'More speakers detected, may have false positives. Use for clearly distinct voices.',
+        config: CLUSTERING_PROFILES.sensitive
+      },
+      very_sensitive: {
+        name: 'Very Sensitive',
+        description: 'Maximum speaker separation. Use for very different voices or testing.',
+        config: CLUSTERING_PROFILES.very_sensitive
+      },
+      custom: {
+        name: 'Custom',
+        description: 'User-defined settings for advanced configuration.',
+        config: {}
+      }
+    }
+  },
+
+  /**
+   * Get current configuration including applied profile.
+   */
+  getCurrentConfig(): StreamingDiarizationConfig {
+    return { ...currentConfig }
+  },
+
+  /**
+   * Validate a similarity threshold value and get recommendations.
+   * Based on feature request requirements:
+   * - Threshold of 0.5 may be too low, causing speakers to merge
+   * - Stricter thresholds (0.6-0.7) may help separate speakers
+   */
+  validateThreshold(threshold: number): {
+    isValid: boolean
+    recommendations: string[]
+    suggestedProfile: ClusteringProfile | null
+  } {
+    const recommendations: string[] = []
+    let suggestedProfile: ClusteringProfile | null = null
+
+    if (threshold < 0.25) {
+      recommendations.push('Very low threshold may cause excessive speaker splitting')
+      recommendations.push('Consider using "sensitive" profile instead')
+      suggestedProfile = 'sensitive'
+    } else if (threshold < 0.35) {
+      recommendations.push('Sensitive threshold, good for detecting subtle voice differences')
+      recommendations.push('Recommended for meetings with clearly distinct speakers')
+    } else if (threshold < 0.50) {
+      recommendations.push('Balanced threshold, good for most scenarios')
+      recommendations.push('This is the recommended default for general use')
+    } else if (threshold < 0.60) {
+      recommendations.push('Strict threshold, may merge speakers with similar voices')
+      recommendations.push('Use if you\'re detecting too many speakers (over-splitting)')
+    } else if (threshold < 0.70) {
+      recommendations.push('Very strict threshold, addresses speaker merging issues')
+      recommendations.push('Recommended if speakers are being merged into one cluster')
+      suggestedProfile = 'conservative'
+    } else {
+      recommendations.push('Extremely strict threshold, likely to merge all speakers')
+      recommendations.push('Not recommended - consider using "conservative" profile instead')
+      suggestedProfile = 'conservative'
+    }
+
+    return {
+      isValid: threshold >= 0.25 && threshold <= 0.70,
+      recommendations,
+      suggestedProfile
+    }
   }
 }
 

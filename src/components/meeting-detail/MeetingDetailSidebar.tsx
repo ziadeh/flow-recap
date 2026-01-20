@@ -39,6 +39,8 @@ interface MeetingDetailSidebarProps {
   isMobile?: boolean
   isTablet?: boolean
   isDesktop?: boolean
+  /** Hide the audio player in sidebar when main audio player is already shown */
+  hideAudioPlayer?: boolean
 }
 
 // ============================================================================
@@ -173,6 +175,18 @@ function RecordingPlayerCard({ recordings, currentRecordingIndex, onRecordingCha
 
   const currentRecording = recordings[currentRecordingIndex]
 
+  // Cache-busting key that only changes when the recording changes
+  // This prevents browser from using cached version with incomplete WAV header
+  // while avoiding repeated reloads on every render
+  const [cacheBustKey, setCacheBustKey] = useState(() => Date.now())
+
+  // Update cache bust key when recording changes to force fresh load
+  useEffect(() => {
+    if (currentRecording?.file_path) {
+      setCacheBustKey(Date.now())
+    }
+  }, [currentRecording?.file_path])
+
   // Encode the file path properly for the protocol handler
   const encodeFilePath = (path: string): string => {
     if (!path) return ''
@@ -186,7 +200,7 @@ function RecordingPlayerCard({ recordings, currentRecordingIndex, onRecordingCha
   }
 
   const audioSrc = currentRecording?.file_path
-    ? `local-file://${encodeFilePath(currentRecording.file_path)}?t=${Date.now()}`
+    ? `local-file://${encodeFilePath(currentRecording.file_path)}?t=${cacheBustKey}`
     : ''
 
   // Set duration from recording metadata
@@ -814,7 +828,8 @@ export function MeetingDetailSidebar({
   onRecordingSaved,
   isMobile = false,
   isTablet = false,
-  isDesktop: _isDesktop = true
+  isDesktop: _isDesktop = true,
+  hideAudioPlayer = false
 }: MeetingDetailSidebarProps) {
   // isDesktop is available for future use
   void _isDesktop
@@ -913,13 +928,16 @@ export function MeetingDetailSidebar({
             />
           </div>
 
-          {/* Right column: Players + Speakers */}
+          {/* Right column: Players (if not hidden) + Speakers */}
           <div className="space-y-token-md">
-            <RecordingPlayerCard
-              recordings={recordings}
-              currentRecordingIndex={currentRecordingIndex}
-              onRecordingChange={setCurrentRecordingIndex}
-            />
+            {/* Only show RecordingPlayerCard if main audio player is not already shown */}
+            {!hideAudioPlayer && (
+              <RecordingPlayerCard
+                recordings={recordings}
+                currentRecordingIndex={currentRecordingIndex}
+                onRecordingChange={setCurrentRecordingIndex}
+              />
+            )}
             <SpeakersListCard
               speakers={speakers}
               speakerNameOverrides={speakerNameOverrides}
@@ -947,12 +965,14 @@ export function MeetingDetailSidebar({
           participantCount={participantCount}
         />
 
-        {/* Recording Player Card */}
-        <RecordingPlayerCard
-          recordings={recordings}
-          currentRecordingIndex={currentRecordingIndex}
-          onRecordingChange={setCurrentRecordingIndex}
-        />
+        {/* Recording Player Card - only show if main audio player is not already shown */}
+        {!hideAudioPlayer && (
+          <RecordingPlayerCard
+            recordings={recordings}
+            currentRecordingIndex={currentRecordingIndex}
+            onRecordingChange={setCurrentRecordingIndex}
+          />
+        )}
 
         {/* Speakers List Card */}
         <SpeakersListCard

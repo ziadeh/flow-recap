@@ -6,6 +6,8 @@ import { useMeetingDetail } from '../hooks/useMeetingDetail'
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
 import { useLiveTranscript } from '../hooks/useLiveTranscript'
 import { useRecordingStore } from '../stores/recording-store'
+import { useMeetingListStore } from '../stores/meeting-list-store'
+import { useToast } from '../hooks/useToast'
 import { useResponsive } from '../hooks/useResponsive'
 import { useInsightsData } from '../hooks/useInsightsData'
 import { CompactMeetingHeader } from '../components/meeting-detail/CompactMeetingHeader'
@@ -16,6 +18,7 @@ import { NotesTab } from '../components/meeting-detail/NotesTab'
 import { ActionItemsList } from '../components/meeting-detail/ActionItemsList'
 import { InsightsTab } from '../components/meeting-detail/InsightsTab'
 import { RecordingsTab } from '../components/meeting-detail/RecordingsTab'
+import { SpeakerParticipationTab } from '../components/meeting-detail/SpeakerParticipationTab'
 import { MainContentArea } from '../components/meeting-detail/MainContentArea'
 import { EditMeetingModal } from '../components/EditMeetingModal'
 import { SpeakerManagementModal } from '../components/meeting-detail/SpeakerManagementModal'
@@ -60,6 +63,12 @@ export default function MeetingDetail() {
   // (e.g., diarization complete, transcripts update, tasks update, etc.)
   const REFETCH_DEBOUNCE_MS = 1000
   const debouncedRefetch = useDebouncedCallback(refetch, REFETCH_DEBOUNCE_MS)
+
+  // Meeting list store - for updating meeting title in the list
+  const updateMeetingInList = useMeetingListStore((state) => state.updateMeeting)
+
+  // Toast notifications for user feedback
+  const toast = useToast()
 
   // Recording state - check if we're recording for this meeting
   const recordingStatus = useRecordingStore((state) => state.status)
@@ -428,8 +437,27 @@ export default function MeetingDetail() {
           }}
           onSettings={() => setIsSpeakerModalOpen(true)}
           onTitleChange={async (newTitle: string) => {
-            await window.electronAPI.db.meetings.update(meeting.id, { title: newTitle })
-            debouncedRefetch()
+            // Store the old title in case we need to revert
+            const oldTitle = meeting.title
+
+            // Optimistic update: Update the meeting list store immediately for instant UI feedback
+            updateMeetingInList(meeting.id, { title: newTitle })
+
+            // Persist to database in the background (don't await for UI responsiveness)
+            window.electronAPI.db.meetings.update(meeting.id, { title: newTitle })
+              .then(() => {
+                // Optionally refetch to ensure consistency, but with debounce to avoid excessive fetches
+                debouncedRefetch()
+              })
+              .catch((err) => {
+                console.error('Failed to save meeting title:', err)
+                // Revert the optimistic update on error
+                updateMeetingInList(meeting.id, { title: oldTitle })
+                // Refetch to sync the header's local state with the actual DB state
+                debouncedRefetch()
+                // Show error toast to user
+                toast.error('Failed to save title', 'Your changes could not be saved. Please try again.')
+              })
           }}
           hasTranscripts={transcripts.length > 0}
           hasNotes={notes.length > 0}
@@ -598,6 +626,12 @@ export default function MeetingDetail() {
                       onDelete={handleDeleteRecording}
                     />
                   )}
+                  {activeTab === 'analytics' && meeting && (
+                    <SpeakerParticipationTab
+                      meetingId={meeting.id}
+                      isActive={activeTab === 'analytics'}
+                    />
+                  )}
                 </div>
               </div>
 
@@ -644,6 +678,9 @@ export default function MeetingDetail() {
             isMobile={isMobile}
             isTablet={isTablet}
             isDesktop={isDesktop}
+            // Hide the sidebar's audio player on non-mobile devices since the main AudioPlayer is already shown
+            // This prevents duplicate audio loading and multiple protocol handler requests
+            hideAudioPlayer={!isMobile}
           />
         </div>
 

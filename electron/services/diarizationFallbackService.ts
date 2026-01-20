@@ -313,7 +313,8 @@ export const diarizationFallbackService = {
 
     try {
       const result = await batchDiarizationService.processMeeting(meetingId, {
-        diarizationThreshold: 0.4,
+        // FIXED: Lowered from 0.4 to 0.30 for better multi-speaker separation
+        diarizationThreshold: 0.30,
         minSpeakers: 2,
         maxSpeakers: 10,
         onProgress: (progress) => {

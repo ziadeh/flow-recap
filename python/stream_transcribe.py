@@ -58,7 +58,7 @@ import threading
 import queue
 import time
 import warnings
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from pathlib import Path
 
 # Suppress warnings for cleaner output
@@ -85,6 +85,16 @@ warnings.filterwarnings(
 
 # Import numpy unconditionally (used for VAD functions)
 import numpy as np
+
+# Import JSON serialization utilities for safe conversion of numpy/torch types
+# This fixes the 'Object of type float32 is not JSON serializable' error
+from json_serialization_utils import (
+    to_json_serializable,
+    NumpyTorchJSONEncoder,
+    safe_json_dumps,
+    safe_output_json,
+    TORCH_AVAILABLE as JSON_TORCH_AVAILABLE
+)
 
 # Import resampling libraries for converting audio to WhisperX's expected 16kHz sample rate
 # We try multiple options in order of preference: torchaudio > librosa > scipy
@@ -147,9 +157,66 @@ if not WHISPERX_AVAILABLE:
             _IMPORT_ERROR_MESSAGE = f"faster_whisper import error ({type(e).__name__}): {e}"
 
 
+# NOTE: NumpyJSONEncoder and to_python_native are now imported from json_serialization_utils
+# The imported NumpyTorchJSONEncoder handles both numpy and PyTorch types
+# The imported to_json_serializable replaces to_python_native with enhanced functionality
+
+
+def to_python_native(obj: Any) -> Any:
+    """
+    Recursively convert numpy/torch types to Python native types.
+
+    This function is now a thin wrapper around to_json_serializable() from
+    json_serialization_utils, which provides enhanced support for:
+    - All numpy scalar types (float32, float64, int32, int64, bool_)
+    - numpy.ndarray objects
+    - PyTorch tensors (torch.Tensor)
+    - Special float values: NaN -> null, Infinity -> large number
+    - Nested dictionaries and lists
+
+    Args:
+        obj: Any Python object that may contain numpy/torch types
+
+    Returns:
+        Object with all values converted to JSON-serializable Python native types
+    """
+    return to_json_serializable(obj, warn_special_floats=False)
+
+
 def output_json(obj: Dict[str, Any]) -> None:
-    """Output a JSON object as a line to stdout."""
-    print(json.dumps(obj, ensure_ascii=False), flush=True)
+    """
+    Output a JSON object as a line to stdout.
+
+    Uses NumpyTorchJSONEncoder to handle numpy types (float32, int64, etc.)
+    and PyTorch tensors that cannot be serialized by the default JSON encoder.
+
+    This function also handles special float values:
+    - NaN values are converted to null
+    - Infinity values are converted to max float value
+
+    If serialization fails, attempts recovery by converting all values
+    to Python native types. This ensures the transcription pipeline continues
+    even when individual segments have serialization issues.
+    """
+    try:
+        # First try with the custom encoder that handles numpy AND torch types
+        print(json.dumps(obj, ensure_ascii=False, cls=NumpyTorchJSONEncoder), flush=True)
+    except TypeError as e:
+        # If encoding still fails, try converting all values to native types
+        try:
+            converted_obj = to_json_serializable(obj, warn_special_floats=False)
+            print(json.dumps(converted_obj, ensure_ascii=False), flush=True)
+        except Exception as recovery_error:
+            # Last resort: log error to stderr but don't crash the pipeline
+            print(f"[WHISPER DEBUG] JSON serialization error (recovery failed): {e}, {recovery_error}",
+                  file=sys.stderr, flush=True)
+            # Output a minimal error marker that can be parsed
+            error_obj = {
+                "type": "serialization_error",
+                "error": str(e),
+                "original_type": obj.get("type", "unknown")
+            }
+            print(json.dumps(error_obj, ensure_ascii=False), flush=True)
 
 
 def output_status(message: str, **kwargs) -> None:
@@ -163,27 +230,43 @@ def output_error(message: str, code: str = "ERROR") -> None:
 
 
 def output_segment(text: str, start: float, end: float, confidence: float = None, words: List = None, speaker: str = None) -> None:
-    """Output a transcribed segment."""
+    """
+    Output a transcribed segment.
+
+    All numeric values are explicitly converted to Python native types
+    to prevent JSON serialization errors with numpy float32 values.
+    """
     # Console log for debugging - verify Whisper is transcribing audio
     speaker_info = f", speaker: {speaker}" if speaker else ""
     # Show full text but add ellipsis for very long segments
     display_text = text.strip()
     if len(display_text) > 150:
         display_text = display_text[:150] + "... [truncated]"
-    print(f"[WHISPER OUTPUT] Transcribed segment: '{display_text}' (start: {start:.2f}s, end: {end:.2f}s, confidence: {confidence if confidence is not None else 'N/A'}{speaker_info})", file=sys.stderr, flush=True)
 
+    # Convert confidence to float for display, handling numpy types
+    confidence_display = "N/A"
+    if confidence is not None:
+        try:
+            confidence_display = f"{float(confidence):.2f}"
+        except (TypeError, ValueError):
+            confidence_display = str(confidence)
+
+    print(f"[WHISPER OUTPUT] Transcribed segment: '{display_text}' (start: {float(start):.2f}s, end: {float(end):.2f}s, confidence: {confidence_display}{speaker_info})", file=sys.stderr, flush=True)
+
+    # Build result with explicit type conversions to prevent float32 serialization errors
     result = {
         "type": "segment",
         "text": text.strip(),
-        "start": start,
-        "end": end,
+        "start": float(start),  # Ensure Python float
+        "end": float(end),      # Ensure Python float
     }
     if confidence is not None:
-        result["confidence"] = confidence
+        result["confidence"] = float(confidence)  # Ensure Python float
     if words:
-        result["words"] = words
+        # Words may contain numpy types from Whisper, convert them
+        result["words"] = to_python_native(words)
     if speaker:
-        result["speaker"] = speaker
+        result["speaker"] = str(speaker)
     output_json(result)
 
 
@@ -489,6 +572,13 @@ class StreamingTranscriber:
     to fix the 35-second audio repetition bug. When audio is buffered while
     the model loads, the initial_time_offset parameter ensures timestamps
     are calculated correctly from the start of the recording.
+
+    FAULT-TOLERANT ERROR HANDLING:
+    This class implements fault-tolerant error handling for diarization:
+    - Diarization errors NEVER cause transcription segments to be dropped
+    - When diarization fails, transcription continues with fallback speaker IDs
+    - Diarization health is monitored and warnings are emitted to the UI
+    - Last known speaker context is preserved across errors for continuity
     """
 
     def __init__(
@@ -505,8 +595,9 @@ class StreamingTranscriber:
         permissive_vad: bool = False,  # Use lower VAD threshold for system audio transcription
         enable_diarization: bool = False,  # Enable real-time speaker diarization
         # Lower threshold = more speakers detected (more sensitive to voice differences)
-        # Default 0.5 provides better speaker separation than pyannote's default of 0.7
-        diarization_similarity_threshold: float = 0.5,
+        # FIXED: Lowered from 0.5 to 0.30 for better multi-speaker detection during live recording
+        # Typical: same-speaker similarity 0.8-0.95, different speakers 0.2-0.5
+        diarization_similarity_threshold: float = 0.30,
         max_speakers: int = 10,  # Maximum number of speakers to track
         initial_time_offset: float = 0.0  # Initial time offset for buffered audio synchronization
     ):
@@ -537,6 +628,25 @@ class StreamingTranscriber:
         # Track processed speaker segments to prevent duplicates in diarization
         # This is part of the fix for the 35-second audio repetition bug
         self._processed_speaker_segments: set = set()
+
+        # Speaker ID persistence cache for error recovery
+        # These are used to maintain speaker context when individual segment
+        # processing fails (e.g., due to JSON serialization errors with float32)
+        # This prevents all subsequent segments from becoming "Unknown Speaker"
+        self._last_known_speaker: Optional[str] = None
+        self._last_known_speaker_confidence: float = 0.5
+
+        # =====================================================================
+        # DIARIZATION HEALTH MONITORING
+        # Track diarization failures and emit warnings to UI
+        # =====================================================================
+        self._diarization_consecutive_failures: int = 0
+        self._diarization_total_failures: int = 0
+        self._diarization_total_segments: int = 0
+        self._diarization_health_warning_emitted: bool = False
+        self._diarization_failure_threshold: int = 3  # Emit warning after 3 consecutive failures
+        self._diarization_last_failure_time: Optional[float] = None
+        self._diarization_last_failure_reason: Optional[str] = None
 
         # Debug: Log configuration at init
         print(f"[WHISPER DEBUG] StreamingTranscriber initialized:", file=sys.stderr, flush=True)
@@ -1149,42 +1259,244 @@ class StreamingTranscriber:
 
         return segments
 
+    def _generate_fallback_speaker_id(self, timestamp: float) -> str:
+        """
+        Generate a fallback speaker ID when diarization fails.
+
+        Format: 'speaker_unknown_<timestamp>' to ensure uniqueness and traceability.
+        This allows tracking which segments had diarization failures while maintaining
+        the ability to process them later with batch diarization.
+
+        Args:
+            timestamp: The timestamp of the segment in seconds
+
+        Returns:
+            A unique fallback speaker ID string
+        """
+        # Format timestamp to milliseconds for uniqueness
+        timestamp_ms = int(timestamp * 1000)
+        return f"speaker_unknown_{timestamp_ms}"
+
+    def _record_diarization_failure(self, error_reason: str, error_msg: str) -> None:
+        """
+        Record a diarization failure and manage health monitoring state.
+
+        This method:
+        1. Tracks consecutive and total failures
+        2. Logs detailed error information for debugging
+        3. Emits UI warnings when failure threshold is reached
+        4. Preserves error context for post-meeting diagnostics
+
+        Args:
+            error_reason: Short classification of the error (e.g., 'serialization', 'embedding', 'clustering')
+            error_msg: Full error message with details
+        """
+        import traceback
+
+        self._diarization_consecutive_failures += 1
+        self._diarization_total_failures += 1
+        self._diarization_last_failure_time = self.total_processed_samples / self.sample_rate
+        self._diarization_last_failure_reason = error_reason
+
+        # Log detailed error with stack trace for debugging
+        print(f"[DIARIZE ERROR] Failure #{self._diarization_total_failures} "
+              f"(consecutive: {self._diarization_consecutive_failures}): {error_reason}",
+              file=sys.stderr, flush=True)
+        print(f"[DIARIZE ERROR] Details: {error_msg}", file=sys.stderr, flush=True)
+        print(f"[DIARIZE ERROR] Stack trace:\n{traceback.format_exc()}", file=sys.stderr, flush=True)
+
+        # Emit health warning to UI if threshold reached
+        if (self._diarization_consecutive_failures >= self._diarization_failure_threshold and
+            not self._diarization_health_warning_emitted):
+            self._emit_diarization_health_warning()
+
+    def _record_diarization_success(self) -> None:
+        """
+        Record a successful diarization operation.
+
+        Resets consecutive failure counter while preserving total failure count
+        for overall health metrics. Also clears the health warning flag if
+        diarization has recovered.
+        """
+        self._diarization_consecutive_failures = 0
+        self._diarization_total_segments += 1
+
+        # If we were in warning state but have recovered, emit recovery message
+        if self._diarization_health_warning_emitted and self._diarization_consecutive_failures == 0:
+            # Only emit recovery if we've had several successful segments
+            if self._diarization_total_segments > 5:
+                self._emit_diarization_recovery()
+                self._diarization_health_warning_emitted = False
+
+    def _emit_diarization_health_warning(self) -> None:
+        """
+        Emit a diarization health warning message to the UI.
+
+        This is sent as a special JSON message that the frontend can display
+        to inform users that speaker identification is experiencing issues.
+        """
+        self._diarization_health_warning_emitted = True
+
+        warning_msg = {
+            "type": "diarization_health_warning",
+            "message": "Speaker identification experiencing issues - some speakers may not be identified",
+            "consecutive_failures": self._diarization_consecutive_failures,
+            "total_failures": self._diarization_total_failures,
+            "last_failure_reason": self._diarization_last_failure_reason,
+            "last_failure_time": float(self._diarization_last_failure_time) if self._diarization_last_failure_time else None,
+            "is_recoverable": True,  # Indicates the pipeline is still running
+            "recommendation": "Transcription will continue with fallback speaker IDs. "
+                             "Speaker identification may recover automatically or can be "
+                             "re-processed after the recording completes."
+        }
+        output_json(warning_msg)
+
+        print(f"[DIARIZE WARNING] Health warning emitted to UI - {self._diarization_consecutive_failures} "
+              f"consecutive failures detected", file=sys.stderr, flush=True)
+
+    def _emit_diarization_recovery(self) -> None:
+        """
+        Emit a diarization recovery message when the system has recovered from errors.
+        """
+        recovery_msg = {
+            "type": "diarization_health_recovery",
+            "message": "Speaker identification has recovered and is working normally",
+            "total_segments_processed": self._diarization_total_segments,
+            "previous_failures": self._diarization_total_failures
+        }
+        output_json(recovery_msg)
+
+        print(f"[DIARIZE INFO] Health recovery emitted - diarization is working normally again",
+              file=sys.stderr, flush=True)
+
+    def _get_fallback_speaker_for_segment(self, seg: Dict[str, Any]) -> Tuple[str, float]:
+        """
+        Get a fallback speaker ID for a segment when diarization fails.
+
+        Priority order:
+        1. Use last known speaker (if recent and available)
+        2. Generate fallback speaker ID with timestamp
+
+        Args:
+            seg: The transcript segment dictionary containing 'start' and 'end' times
+
+        Returns:
+            Tuple of (speaker_id, confidence)
+        """
+        # Try to use last known speaker for continuity
+        if self._last_known_speaker:
+            # Use reduced confidence to indicate uncertainty
+            return self._last_known_speaker, max(0.3, self._last_known_speaker_confidence * 0.5)
+
+        # Generate fallback speaker ID
+        segment_start = seg.get('start', self.total_processed_samples / self.sample_rate)
+        fallback_id = self._generate_fallback_speaker_id(segment_start)
+        return fallback_id, 0.0  # Zero confidence indicates fallback
+
     def _process_diarization(self, audio: np.ndarray, segments: List[Dict[str, Any]]) -> None:
         """
         Process audio through diarizer and assign speakers to transcript segments.
 
-        IMPORTANT: This method now properly handles buffered audio synchronization
-        to fix the 35-second audio repetition bug. Speaker segments are deduplicated
-        to ensure accurate speaker assignment when audio is flushed from the buffer.
+        IMPORTANT: This method implements FAULT-TOLERANT error handling to ensure
+        transcription NEVER fails due to diarization issues.
+
+        FAULT-TOLERANT DESIGN:
+        1. Diarization errors are isolated from transcription - segments are ALWAYS emitted
+        2. Try-catch wrappers around all diarization operations with graceful fallbacks
+        3. Full stack traces logged for debugging without blocking the pipeline
+        4. Partial speaker data emitted when available (e.g., timestamp works but confidence fails)
+        5. Health monitoring tracks repeated failures and emits UI warnings
 
         Args:
             audio: Float32 numpy array of audio
             segments: List of transcript segments to assign speakers to
         """
+        diarization_succeeded = False
+        speaker_segments = []
+
+        # =====================================================================
+        # STEP 1: Attempt to get speaker segments from diarizer (fault-tolerant)
+        # =====================================================================
         try:
             # Add audio to diarizer and get speaker segments
             speaker_segments = self.diarizer.add_audio(audio)
+            diarization_succeeded = True
+        except Exception as audio_add_error:
+            # Failed to add audio to diarizer - record failure but continue
+            error_type = type(audio_add_error).__name__
+            error_msg = str(audio_add_error)
+            self._record_diarization_failure('audio_processing', f"{error_type}: {error_msg}")
+            # Don't return - we'll assign fallback speakers to transcript segments
 
-            # Deduplicate speaker segments based on time ranges
-            # This prevents the same speaker segment from being added twice
-            # when buffered audio is processed alongside live audio
+        # =====================================================================
+        # STEP 2: Process speaker segments (fault-tolerant, emit partial data)
+        # =====================================================================
+        if diarization_succeeded and speaker_segments:
             for seg in speaker_segments:
-                # Create a unique key for this segment based on time range
-                seg_key = f"{seg['start']:.2f}-{seg['end']:.2f}"
-                if seg_key in self._processed_speaker_segments:
-                    print(f"[DIARIZE DEBUG] Skipping duplicate speaker segment: {seg_key}", file=sys.stderr, flush=True)
-                    continue
+                try:
+                    # Ensure segment values are Python native types to prevent JSON serialization errors
+                    # This is critical for fixing the float32 serialization bug
+                    seg_start = float(seg.get('start', 0))
+                    seg_end = float(seg.get('end', 0))
+                    seg_speaker = str(seg.get('speaker', 'Unknown'))
 
-                self._processed_speaker_segments.add(seg_key)
-                self.recent_speaker_segments.append(seg)
+                    # Try to get confidence, but emit partial data if this fails
+                    try:
+                        seg_confidence = float(seg.get('confidence', 0.5))
+                    except (TypeError, ValueError):
+                        # Confidence conversion failed - emit partial data with default confidence
+                        seg_confidence = 0.5
+                        print(f"[DIARIZE DEBUG] Confidence conversion failed for segment, using default",
+                              file=sys.stderr, flush=True)
 
-            # Limit to last 300 seconds (5 minutes) of segments to prevent memory issues
-            # while still providing enough history for accurate speaker identification
+                    # Create a unique key for this segment based on time range
+                    seg_key = f"{seg_start:.2f}-{seg_end:.2f}"
+                    if seg_key in self._processed_speaker_segments:
+                        print(f"[DIARIZE DEBUG] Skipping duplicate speaker segment: {seg_key}",
+                              file=sys.stderr, flush=True)
+                        continue
+
+                    self._processed_speaker_segments.add(seg_key)
+
+                    # Store normalized segment with Python native types
+                    normalized_seg = {
+                        'speaker': seg_speaker,
+                        'start': seg_start,
+                        'end': seg_end,
+                        'confidence': seg_confidence
+                    }
+                    self.recent_speaker_segments.append(normalized_seg)
+
+                    # Cache the last known speaker for error recovery
+                    self._last_known_speaker = seg_speaker
+                    self._last_known_speaker_confidence = seg_confidence
+
+                    # Record successful segment processing
+                    self._record_diarization_success()
+
+                except (TypeError, ValueError) as seg_error:
+                    # Individual segment conversion failed - record but continue with next segment
+                    self._record_diarization_failure('serialization', str(seg_error))
+
+                    # Try to emit partial data: at minimum, extract timestamp for fallback ID
+                    try:
+                        partial_start = float(seg.get('start', 0)) if 'start' in seg else None
+                        if partial_start is not None:
+                            # We have timestamp - can still use for speaker assignment later
+                            print(f"[DIARIZE DEBUG] Emitting partial data with timestamp {partial_start:.2f}",
+                                  file=sys.stderr, flush=True)
+                    except Exception:
+                        pass  # Can't emit partial data, move on
+
+        # =====================================================================
+        # STEP 3: Memory management - limit speaker segment history
+        # =====================================================================
+        try:
             MAX_SPEAKER_HISTORY_SECONDS = 300.0
             current_time = self.total_processed_samples / self.sample_rate
             if current_time > MAX_SPEAKER_HISTORY_SECONDS:
                 cutoff_time = current_time - MAX_SPEAKER_HISTORY_SECONDS
-                # Also clean up the processed segments set to prevent memory growth
+                # Clean up old segments to prevent memory growth
                 self.recent_speaker_segments = [
                     s for s in self.recent_speaker_segments if s["end"] > cutoff_time
                 ]
@@ -1193,20 +1505,45 @@ class StreamingTranscriber:
                     key for key in self._processed_speaker_segments
                     if float(key.split('-')[1]) > cutoff_time
                 }
+        except Exception as cleanup_error:
+            # Memory cleanup failed - log but continue
+            print(f"[DIARIZE DEBUG] Memory cleanup error (non-critical): {cleanup_error}",
+                  file=sys.stderr, flush=True)
 
-            # Assign speakers to transcript segments using overlap matching
-            for seg in segments:
-                speaker, confidence = self.diarizer.assign_speaker_to_transcript(
-                    seg["start"],
-                    seg["end"],
-                    self.recent_speaker_segments
-                )
-                if speaker:
-                    seg["speaker"] = speaker
-                    seg["speaker_confidence"] = confidence
+        # =====================================================================
+        # STEP 4: Assign speakers to transcript segments (ALWAYS succeeds)
+        # This is the CRITICAL section - transcript segments must ALWAYS be emitted
+        # =====================================================================
+        for seg in segments:
+            speaker_assigned = False
 
-        except Exception as e:
-            print(f"[DIARIZE DEBUG] Error processing diarization: {e}", file=sys.stderr, flush=True)
+            # Attempt 1: Use diarization overlap matching
+            if diarization_succeeded and self.recent_speaker_segments:
+                try:
+                    speaker, confidence = self.diarizer.assign_speaker_to_transcript(
+                        seg["start"],
+                        seg["end"],
+                        self.recent_speaker_segments
+                    )
+                    if speaker:
+                        seg["speaker"] = speaker
+                        seg["speaker_confidence"] = float(confidence) if confidence is not None else 0.5
+                        speaker_assigned = True
+                        self._record_diarization_success()
+                except Exception as assign_error:
+                    # Speaker assignment failed - record but don't fail the segment
+                    self._record_diarization_failure('speaker_assignment', str(assign_error))
+
+            # Attempt 2: Fallback speaker assignment (if diarization failed)
+            if not speaker_assigned:
+                fallback_speaker, fallback_confidence = self._get_fallback_speaker_for_segment(seg)
+                seg["speaker"] = fallback_speaker
+                seg["speaker_confidence"] = fallback_confidence
+                seg["speaker_fallback"] = True  # Flag indicating this is a fallback assignment
+
+                print(f"[DIARIZE DEBUG] Using fallback speaker '{fallback_speaker}' for segment "
+                      f"{seg.get('start', 0):.2f}s-{seg.get('end', 0):.2f}s",
+                      file=sys.stderr, flush=True)
 
     def add_audio(self, audio_data: bytes) -> None:
         """Add audio data to the buffer."""
@@ -1492,9 +1829,9 @@ def main():
     parser.add_argument(
         "--diarization-threshold",
         type=float,
-        default=0.5,
-        help="Speaker similarity threshold for diarization (0.0-1.0, default: 0.5). "
-             "Lower values = more speakers detected."
+        default=0.30,
+        help="Speaker similarity threshold for diarization (0.0-1.0, default: 0.30). "
+             "Lower values = more speakers detected. Typical: same-speaker 0.8-0.95, different 0.2-0.5."
     )
 
     parser.add_argument(

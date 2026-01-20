@@ -29,7 +29,7 @@ import type {
   AudioDiagnosticResult,
   AudioDevice
 } from '@/types/database'
-import { PythonEnvironmentSetup } from '@/components/PythonEnvironmentSetup'
+import { SteppedEnvironmentSetup } from '@/components/SteppedEnvironmentSetup'
 
 // ============================================================================
 // Types
@@ -307,8 +307,8 @@ function PythonSetupStep({ onNext, onBack }: StepProps) {
           </div>
         </>
       ) : (
-        <PythonEnvironmentSetup
-          autoStart={true}
+        <SteppedEnvironmentSetup
+          autoStart={false}
           showSkip={true}
           onComplete={handleSetupComplete}
           onSkip={handleSkip}

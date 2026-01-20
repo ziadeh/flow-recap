@@ -14,6 +14,7 @@
  */
 
 import { BrowserWindow } from 'electron'
+import { diarizationDebugService } from './diarizationDebugService'
 
 // ============================================================================
 // Priority Event Types
@@ -708,8 +709,46 @@ class IPCEventBatcher {
       batchTimestamp: Date.now()
     }
 
-    mainWindow.webContents.send('streamingDiarization:batchedUpdate', batchedUpdate)
-    this.stats.streamingDiarization.batchesSent++
+    try {
+      mainWindow.webContents.send('streamingDiarization:batchedUpdate', batchedUpdate)
+      this.stats.streamingDiarization.batchesSent++
+
+      // Debug logging: IPC event sent successfully
+      diarizationDebugService.logIPCEvent(
+        'streamingDiarization:batchedUpdate',
+        {
+          segmentsCount: batchedUpdate.segments.length,
+          speakerChangesCount: batchedUpdate.speakerChanges.length,
+          hasStatus: !!batchedUpdate.status,
+          correctionsCount: batchedUpdate.corrections.length,
+          hasStats: !!batchedUpdate.stats,
+          speakers: batchedUpdate.segments.map(s => s.speaker).filter((v, i, a) => a.indexOf(v) === i)
+        },
+        true
+      )
+
+      // Log each speaker change event individually for detailed tracking
+      for (const speakerChange of batchedUpdate.speakerChanges) {
+        diarizationDebugService.logIPCEvent(
+          'streamingDiarization:speakerChange',
+          speakerChange,
+          true
+        )
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+
+      // Debug logging: IPC event failed
+      diarizationDebugService.logIPCEvent(
+        'streamingDiarization:batchedUpdate',
+        {
+          segmentsCount: batchedUpdate.segments.length,
+          speakerChangesCount: batchedUpdate.speakerChanges.length
+        },
+        false,
+        errorMsg
+      )
+    }
 
     // Clear the buffer
     this.streamingDiarizationBuffer = { segments: [], speakerChanges: [], corrections: [] }

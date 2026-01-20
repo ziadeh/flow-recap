@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from './Modal';
 import { Loader2, AlertCircle } from 'lucide-react';
 import type { Meeting } from '../types/database';
+import { useMeetingListStore } from '../stores/meeting-list-store';
 
 interface EditMeetingModalProps {
   isOpen: boolean;
@@ -45,6 +46,9 @@ function formatToDateTimeLocal(isoString: string): string {
 
 export function EditMeetingModal({ isOpen, onClose, meeting, onSuccess }: EditMeetingModalProps) {
   const titleInputRef = useRef<HTMLInputElement>(null);
+
+  // Get the updateMeeting function from the meeting list store to sync updates
+  const updateMeetingInList = useMeetingListStore((state) => state.updateMeeting);
 
   const [formData, setFormData] = useState<FormData>({
     title: meeting.title,
@@ -124,6 +128,9 @@ export function EditMeetingModal({ isOpen, onClose, meeting, onSuccess }: EditMe
       };
 
       await window.electronAPI.db.meetings.update(meeting.id, input);
+
+      // Update the meeting list store to reflect the changes immediately
+      updateMeetingInList(meeting.id, input);
 
       // Call success callback if provided
       if (onSuccess) {

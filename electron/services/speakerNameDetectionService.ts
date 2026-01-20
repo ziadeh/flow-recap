@@ -130,6 +130,122 @@ const NAME_REFERENCE_PATTERNS = [
 ]
 
 // ============================================================================
+// Pending Candidate Queue for Retry Mechanism
+// ============================================================================
+
+/**
+ * Queue for storing candidates that failed to persist due to race conditions.
+ * These will be retried on subsequent operations when the speaker record is committed.
+ */
+interface PendingCandidate {
+  input: CreateSpeakerNameCandidateInput
+  retryCount: number
+  timestamp: number
+}
+
+const pendingCandidatesQueue: PendingCandidate[] = []
+const MAX_RETRY_COUNT = 5
+const RETRY_DELAY_MS = 100 // 100ms delay between retries
+const MAX_QUEUE_AGE_MS = 30000 // Remove items older than 30 seconds
+
+/**
+ * Process pending candidates queue - called before each createOrUpdateCandidate
+ */
+function processPendingCandidatesQueue(): void {
+  if (pendingCandidatesQueue.length === 0) return
+
+  const now = Date.now()
+  const toProcess = [...pendingCandidatesQueue]
+  pendingCandidatesQueue.length = 0 // Clear the queue, we'll re-add failed ones
+
+  for (const pending of toProcess) {
+    // Skip items that are too old
+    if (now - pending.timestamp > MAX_QUEUE_AGE_MS) {
+      console.warn(`[SpeakerNameDetection] Dropping stale pending candidate "${pending.input.candidate_name}" (age: ${now - pending.timestamp}ms)`)
+      continue
+    }
+
+    // Skip items that have exceeded retry count
+    if (pending.retryCount >= MAX_RETRY_COUNT) {
+      console.warn(`[SpeakerNameDetection] Dropping pending candidate "${pending.input.candidate_name}" after ${pending.retryCount} retries`)
+      continue
+    }
+
+    // Try to process the candidate
+    try {
+      const db = getDatabaseService().getDatabase()
+      const speakerExists = db.prepare('SELECT 1 FROM speakers WHERE id = ?').get(pending.input.speaker_id)
+      const meetingExists = db.prepare('SELECT 1 FROM meetings WHERE id = ?').get(pending.input.meeting_id)
+
+      if (speakerExists && meetingExists) {
+        // Both exist now, try to create the candidate
+        const stmts = getStatements()
+        const id = pending.input.id || randomUUID()
+        const params = {
+          id,
+          meeting_id: pending.input.meeting_id,
+          speaker_id: pending.input.speaker_id,
+          candidate_name: pending.input.candidate_name,
+          confidence: pending.input.confidence ?? 0.5,
+          detection_type: pending.input.detection_type,
+          detection_context: pending.input.detection_context ?? null,
+          source_transcript_id: pending.input.source_transcript_id ?? null,
+          timestamp_ms: pending.input.timestamp_ms,
+          is_accepted: 0,
+          is_rejected: 0
+        }
+        stmts.insertCandidate.run(params)
+        console.log(`[SpeakerNameDetection] Successfully persisted pending candidate "${pending.input.candidate_name}" on retry ${pending.retryCount + 1}`)
+      } else {
+        // Still missing, re-queue with incremented retry count
+        pendingCandidatesQueue.push({
+          ...pending,
+          retryCount: pending.retryCount + 1
+        })
+      }
+    } catch (error) {
+      // If it fails again, re-queue
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      if (errorMessage.includes('FOREIGN KEY') || errorMessage.includes('UNIQUE')) {
+        pendingCandidatesQueue.push({
+          ...pending,
+          retryCount: pending.retryCount + 1
+        })
+      } else {
+        console.error(`[SpeakerNameDetection] Unexpected error processing pending candidate:`, error)
+      }
+    }
+  }
+}
+
+/**
+ * Start periodic processing of pending candidates queue.
+ * This ensures pending candidates are processed even during gaps in transcription.
+ */
+let pendingQueueProcessorInterval: NodeJS.Timeout | null = null
+const PENDING_QUEUE_PROCESSOR_INTERVAL_MS = 1000 // Check every 1 second
+
+function startPendingQueueProcessor(): void {
+  if (pendingQueueProcessorInterval) return // Already running
+
+  pendingQueueProcessorInterval = setInterval(() => {
+    if (pendingCandidatesQueue.length > 0) {
+      processPendingCandidatesQueue()
+    }
+  }, PENDING_QUEUE_PROCESSOR_INTERVAL_MS)
+}
+
+function stopPendingQueueProcessor(): void {
+  if (pendingQueueProcessorInterval) {
+    clearInterval(pendingQueueProcessorInterval)
+    pendingQueueProcessorInterval = null
+  }
+}
+
+// Start the processor when the module loads
+startPendingQueueProcessor()
+
+// ============================================================================
 // Prepared Statements Cache
 // ============================================================================
 
@@ -640,6 +756,69 @@ export const speakerNameDetectionService = {
    */
   createOrUpdateCandidate(input: CreateSpeakerNameCandidateInput): SpeakerNameCandidate {
     const stmts = getStatements()
+    const db = getDatabaseService().getDatabase()
+
+    // First, try to process any pending candidates from previous race conditions
+    processPendingCandidatesQueue()
+
+    // Defensive check: Verify that the speaker exists in the database before attempting to create a candidate
+    // This prevents FOREIGN KEY constraint failures when speaker_id references a non-existent speaker
+    // (can happen during race conditions in live transcription where speaker detection triggers
+    // before the speaker record is fully committed to the database)
+    const speakerExists = db.prepare('SELECT 1 FROM speakers WHERE id = ?').get(input.speaker_id)
+    if (!speakerExists) {
+      console.warn(`[SpeakerNameDetection] Speaker ${input.speaker_id} not found in database, queueing candidate "${input.candidate_name}" for retry`)
+      // Queue the candidate for retry
+      pendingCandidatesQueue.push({
+        input,
+        retryCount: 0,
+        timestamp: Date.now()
+      })
+      // Return a placeholder candidate (not persisted yet)
+      return {
+        id: input.id || randomUUID(),
+        meeting_id: input.meeting_id,
+        speaker_id: input.speaker_id,
+        candidate_name: input.candidate_name,
+        confidence: input.confidence ?? 0.5,
+        detection_type: input.detection_type,
+        detection_context: input.detection_context ?? null,
+        source_transcript_id: input.source_transcript_id ?? null,
+        timestamp_ms: input.timestamp_ms,
+        is_accepted: false,
+        is_rejected: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    }
+
+    // Also verify the meeting exists to avoid FK constraint failure on meeting_id
+    const meetingExists = db.prepare('SELECT 1 FROM meetings WHERE id = ?').get(input.meeting_id)
+    if (!meetingExists) {
+      console.warn(`[SpeakerNameDetection] Meeting ${input.meeting_id} not found in database, queueing candidate "${input.candidate_name}" for retry`)
+      // Queue the candidate for retry
+      pendingCandidatesQueue.push({
+        input,
+        retryCount: 0,
+        timestamp: Date.now()
+      })
+      // Return a placeholder candidate (not persisted yet)
+      return {
+        id: input.id || randomUUID(),
+        meeting_id: input.meeting_id,
+        speaker_id: input.speaker_id,
+        candidate_name: input.candidate_name,
+        confidence: input.confidence ?? 0.5,
+        detection_type: input.detection_type,
+        detection_context: input.detection_context ?? null,
+        source_transcript_id: input.source_transcript_id ?? null,
+        timestamp_ms: input.timestamp_ms,
+        is_accepted: false,
+        is_rejected: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    }
 
     // Check if this candidate already exists
     const existing = stmts.getExistingCandidate.get(
@@ -693,8 +872,50 @@ export const speakerNameDetectionService = {
       is_rejected: 0
     }
 
-    stmts.insertCandidate.run(params)
-    return rowToCandidate(stmts.getCandidateById.get(id) as Record<string, unknown>)
+    // Wrap the INSERT in try-catch to handle race conditions where the speaker/meeting
+    // might be deleted between the defensive check and the actual insert, or other
+    // foreign key constraint failures that slip through the defensive checks
+    try {
+      stmts.insertCandidate.run(params)
+      return rowToCandidate(stmts.getCandidateById.get(id) as Record<string, unknown>)
+    } catch (error) {
+      // Check if this is a foreign key constraint error
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorCode = (error as { code?: string }).code || ''
+
+      if (errorCode === 'SQLITE_CONSTRAINT_FOREIGNKEY' || errorMessage.includes('FOREIGN KEY constraint failed')) {
+        console.warn(`[SpeakerNameDetection] Foreign key constraint failed for candidate "${input.candidate_name}" ` +
+          `(speaker_id: ${input.speaker_id}, meeting_id: ${input.meeting_id}). ` +
+          `Queueing for retry.`)
+
+        // Queue the candidate for retry on subsequent operations
+        pendingCandidatesQueue.push({
+          input,
+          retryCount: 0,
+          timestamp: Date.now()
+        })
+
+        // Return a placeholder candidate (will be persisted on retry)
+        return {
+          id,
+          meeting_id: input.meeting_id,
+          speaker_id: input.speaker_id,
+          candidate_name: input.candidate_name,
+          confidence: input.confidence ?? 0.5,
+          detection_type: input.detection_type,
+          detection_context: input.detection_context ?? null,
+          source_transcript_id: input.source_transcript_id ?? null,
+          timestamp_ms: input.timestamp_ms,
+          is_accepted: false,
+          is_rejected: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      }
+
+      // Re-throw other errors
+      throw error
+    }
   },
 
   /**
@@ -938,12 +1159,44 @@ export const speakerNameDetectionService = {
    */
   logDetectionEvent(input: CreateSpeakerNameDetectionEventInput): SpeakerNameDetectionEvent {
     const stmts = getStatements()
+    const db = getDatabaseService().getDatabase()
     const id = input.id || randomUUID()
+
+    // Defensive check: Verify meeting exists to avoid FK constraint failure
+    const meetingExists = db.prepare('SELECT 1 FROM meetings WHERE id = ?').get(input.meeting_id)
+    if (!meetingExists) {
+      console.warn(`[SpeakerNameDetection] Meeting ${input.meeting_id} not found, skipping event logging for "${input.event_type}"`)
+      // Return a placeholder event without persisting
+      return {
+        id,
+        meeting_id: input.meeting_id,
+        speaker_id: input.speaker_id ?? null,
+        event_type: input.event_type,
+        description: input.description,
+        confidence: input.confidence ?? null,
+        candidate_name: input.candidate_name ?? null,
+        detection_type: input.detection_type ?? null,
+        context_data: input.context_data ?? null,
+        timestamp_ms: input.timestamp_ms,
+        created_at: new Date().toISOString()
+      }
+    }
+
+    // Defensive check: If speaker_id is provided, verify it exists
+    // If speaker doesn't exist, set speaker_id to null to avoid FK constraint failure
+    let validatedSpeakerId = input.speaker_id ?? null
+    if (validatedSpeakerId) {
+      const speakerExists = db.prepare('SELECT 1 FROM speakers WHERE id = ?').get(validatedSpeakerId)
+      if (!speakerExists) {
+        console.warn(`[SpeakerNameDetection] Speaker ${validatedSpeakerId} not found, logging event without speaker reference`)
+        validatedSpeakerId = null
+      }
+    }
 
     const params = {
       id,
       meeting_id: input.meeting_id,
-      speaker_id: input.speaker_id ?? null,
+      speaker_id: validatedSpeakerId,
       event_type: input.event_type,
       description: input.description,
       confidence: input.confidence ?? null,
@@ -953,12 +1206,42 @@ export const speakerNameDetectionService = {
       timestamp_ms: input.timestamp_ms
     }
 
-    stmts.insertEvent.run(params)
+    // Wrap the INSERT in try-catch to handle race conditions
+    try {
+      stmts.insertEvent.run(params)
 
-    // Return the created event
-    const db = getDatabaseService().getDatabase()
-    const row = db.prepare('SELECT * FROM speaker_name_detection_events WHERE id = ?').get(id) as Record<string, unknown>
-    return rowToEvent(row)
+      // Return the created event
+      const row = db.prepare('SELECT * FROM speaker_name_detection_events WHERE id = ?').get(id) as Record<string, unknown>
+      return rowToEvent(row)
+    } catch (error) {
+      // Check if this is a foreign key constraint error
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorCode = (error as { code?: string }).code || ''
+
+      if (errorCode === 'SQLITE_CONSTRAINT_FOREIGNKEY' || errorMessage.includes('FOREIGN KEY constraint failed')) {
+        console.warn(`[SpeakerNameDetection] Foreign key constraint failed for event "${input.event_type}" ` +
+          `(speaker_id: ${input.speaker_id}, meeting_id: ${input.meeting_id}). ` +
+          `This can happen during live transcription race conditions. Returning placeholder.`)
+
+        // Return a placeholder event without persisting
+        return {
+          id,
+          meeting_id: input.meeting_id,
+          speaker_id: validatedSpeakerId,
+          event_type: input.event_type,
+          description: input.description,
+          confidence: input.confidence ?? null,
+          candidate_name: input.candidate_name ?? null,
+          detection_type: input.detection_type ?? null,
+          context_data: input.context_data ?? null,
+          timestamp_ms: input.timestamp_ms,
+          created_at: new Date().toISOString()
+        }
+      }
+
+      // Re-throw other errors
+      throw error
+    }
   },
 
   /**

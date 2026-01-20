@@ -619,14 +619,37 @@ function parseTopicFromNote(note: MeetingNote): ExtractedTopic | null {
     const nameMatch = content.match(/##\s+(.+?)(?=\n|$)/)
     const name = nameMatch ? nameMatch[1].trim() : 'Unnamed Topic'
 
-    // Extract description (first paragraph after heading, before speakers or decisions)
-    const descMatch = content.match(/##\s+.+?\n\n(.+?)(?=\n\n👥|\n\n###|$)/s)
+    // Extract description (first paragraph after heading, before timing/sentiment/speakers/decisions)
+    const descMatch = content.match(/##\s+.+?\n\n(.+?)(?=\n\n⏱️|\n\n\[|👥|\n\n###|$)/s)
     const description = descMatch ? descMatch[1].trim() : ''
+
+    // Extract timing information (⏱️ MM:SS - MM:SS (duration))
+    let startTimeMs = 0
+    let endTimeMs = 0
+    let durationMs = 0
+    const timingMatch = content.match(/⏱️\s+(\d{2}:\d{2})\s+-\s+(\d{2}:\d{2})/)
+    if (timingMatch) {
+      startTimeMs = parseTimestampToMs(timingMatch[1])
+      endTimeMs = parseTimestampToMs(timingMatch[2])
+      durationMs = endTimeMs - startTimeMs
+    }
+
+    // Extract sentiment from tag
+    const sentimentMatch = content.match(/\[(✅|⚠️|📝|🔄)\s+(POSITIVE|NEGATIVE|NEUTRAL|MIXED)\]/)
+    const sentiment: SentimentType = sentimentMatch
+      ? (sentimentMatch[2].toLowerCase() as SentimentType)
+      : 'neutral'
 
     // Extract speakers
     const speakersMatch = content.match(/👥\s+Speakers:\s+(.+?)(?=\n\n|$)/s)
     const speakers = speakersMatch
       ? speakersMatch[1].split(',').map(s => s.trim())
+      : []
+
+    // Extract key points
+    const keyPointsMatch = content.match(/###\s+Key Points:\n((?:•.+\n?)+)/s)
+    const keyPoints = keyPointsMatch
+      ? keyPointsMatch[1].split('\n').map(line => line.replace(/^•\s*/, '').trim()).filter(Boolean)
       : []
 
     // Extract decisions
@@ -638,11 +661,11 @@ function parseTopicFromNote(note: MeetingNote): ExtractedTopic | null {
     return {
       name,
       description,
-      durationMs: 0,
-      startTimeMs: 0,
-      endTimeMs: 0,
-      sentiment: 'neutral',
-      keyPoints: [],
+      durationMs,
+      startTimeMs,
+      endTimeMs,
+      sentiment,
+      keyPoints,
       decisions,
       speakers,
       sourceTranscriptIds: note.source_transcript_ids ? JSON.parse(note.source_transcript_ids) as string[] : undefined
@@ -959,8 +982,22 @@ ${getModeFilteringInstructions(noteGenerationMode)}`
     for (const topic of extraction.topics) {
       let content = `## ${topic.name}\n\n${topic.description}`
 
+      // Add timing information
+      if (topic.startTimeMs !== undefined && topic.endTimeMs !== undefined && topic.durationMs !== undefined) {
+        content = `${content}\n\n⏱️ ${formatTimestamp(topic.startTimeMs)} - ${formatTimestamp(topic.endTimeMs)} (${formatDuration(topic.durationMs)})`
+      }
+
+      // Add sentiment information
+      if (config.includeSentiment) {
+        content = `${content}\n\n${formatSentimentTag(topic.sentiment)}`
+      }
+
       if (topic.speakers.length > 0) {
         content = `${content}\n\n👥 Speakers: ${topic.speakers.join(', ')}`
+      }
+
+      if (topic.keyPoints.length > 0) {
+        content = `${content}\n\n### Key Points:\n${topic.keyPoints.map(p => `• ${p}`).join('\n')}`
       }
 
       if (topic.decisions.length > 0) {

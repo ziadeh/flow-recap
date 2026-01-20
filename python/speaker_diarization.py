@@ -691,7 +691,7 @@ class SpeakerClusterer:
         num_speakers: Optional[int] = None,
         min_speakers: int = 2,
         max_speakers: int = 10,
-        similarity_threshold: float = 0.4,  # Lowered from 0.55 for better multi-speaker separation
+        similarity_threshold: float = 0.35,  # Lowered from 0.4 for better multi-speaker separation (FIX for Speaker_0 issue)
         min_cluster_size: int = 1
     ):
         self.method = method

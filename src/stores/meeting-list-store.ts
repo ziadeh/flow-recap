@@ -39,6 +39,9 @@ export interface MeetingListState {
   removeMeeting: (id: string) => void
   removeMeetings: (ids: string[]) => void
 
+  // Meeting update (for edits like renaming)
+  updateMeeting: (id: string, updates: Partial<Meeting>) => void
+
   // Combined view (real + optimistic meetings)
   getCombinedMeetings: () => Meeting[]
 
@@ -130,6 +133,15 @@ export const useMeetingListStore = create<MeetingListState>((set, get) => ({
     const idsSet = new Set(ids)
     set((state) => ({
       meetings: state.meetings.filter((m) => !idsSet.has(m.id))
+    }))
+  },
+
+  // Meeting update (for edits like renaming)
+  updateMeeting: (id, updates) => {
+    set((state) => ({
+      meetings: state.meetings.map((m) =>
+        m.id === id ? { ...m, ...updates } : m
+      )
     }))
   },
 

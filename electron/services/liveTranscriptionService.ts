@@ -65,7 +65,7 @@ export interface LiveTranscriptionConfig {
   transcribeSystemAudio?: boolean
   /** Enable speaker diarization to identify different speakers */
   enableDiarization?: boolean
-  /** Speaker similarity threshold (0.0-1.0, default: 0.7) */
+  /** Speaker similarity threshold (0.0-1.0, default: 0.30 - lower = more speakers detected) */
   diarizationThreshold?: number
   /** Maximum number of speakers to detect */
   maxSpeakers?: number
@@ -88,6 +88,10 @@ export interface LiveTranscriptSegment {
   speaker?: string
   /** Speaker ID (database foreign key) */
   speaker_id?: string | null
+  /** Speaker confidence score from diarization (0.0-1.0) */
+  speaker_confidence?: number
+  /** True when speaker was assigned via fallback due to diarization error */
+  speaker_fallback?: boolean
 }
 
 export interface TranscribeChunkResult {
@@ -130,9 +134,39 @@ export interface DiarizationCapabilities {
   embedding_backend?: string
 }
 
+/**
+ * Diarization health state for fault-tolerant error handling
+ *
+ * This tracks the health of the diarization pipeline and enables:
+ * - Detection of repeated failures
+ * - UI warning emissions when issues are detected
+ * - Automatic recovery tracking
+ *
+ * Transcription continues uninterrupted even when diarization has issues,
+ * with fallback speaker IDs assigned when needed.
+ */
+export interface DiarizationHealthState {
+  /** Whether there's an active health warning */
+  hasWarning: boolean
+  /** Human-readable warning message */
+  warningMessage: string | null
+  /** Number of consecutive failures */
+  consecutiveFailures: number
+  /** Total number of failures since session start */
+  totalFailures: number
+  /** Classification of the last failure (e.g., 'serialization', 'embedding', 'clustering') */
+  lastFailureReason: string | null
+  /** Timestamp of the last failure in seconds */
+  lastFailureTime: number | null
+  /** Whether the issue is expected to recover automatically */
+  isRecoverable: boolean
+  /** Suggested action for the user */
+  recommendation: string | null
+}
+
 // Message types from Python process
 interface PythonMessage {
-  type: 'ready' | 'status' | 'segment' | 'error' | 'complete' | 'speaker_segment' | 'speaker_change' | 'diarization_available' | 'diarization_unavailable'
+  type: 'ready' | 'status' | 'segment' | 'error' | 'complete' | 'speaker_segment' | 'speaker_change' | 'diarization_available' | 'diarization_unavailable' | 'diarization_health_warning' | 'diarization_health_recovery' | 'serialization_error'
   message?: string
   text?: string
   start?: number
@@ -154,6 +188,7 @@ interface PythonMessage {
   // Speaker diarization fields
   speaker?: string
   speaker_confidence?: number
+  speaker_fallback?: boolean  // True when speaker was assigned via fallback (diarization failed)
   diarization_enabled?: boolean
   diarization_threshold?: number
   max_speakers?: number
@@ -165,6 +200,18 @@ interface PythonMessage {
   reason?: string
   details?: string
   capabilities?: DiarizationCapabilities
+  // Diarization health monitoring fields
+  consecutive_failures?: number
+  total_failures?: number
+  last_failure_reason?: string
+  last_failure_time?: number
+  is_recoverable?: boolean
+  recommendation?: string
+  total_segments_processed?: number
+  previous_failures?: number
+  // Serialization error fields
+  error?: string
+  original_type?: string
 }
 
 // ============================================================================
@@ -174,6 +221,7 @@ interface PythonMessage {
 const LIVE_TRANSCRIPTION_EVENT = 'live-transcription:update'
 const SEGMENT_EVENT = 'live-transcription:segment'
 const DIARIZATION_STATUS_EVENT = 'live-transcription:diarization-status'
+const DIARIZATION_HEALTH_EVENT = 'live-transcription:diarization-health'
 const DEFAULT_MODEL_SIZE = 'base' // Smaller model for faster live processing
 const DEFAULT_CHUNK_DURATION = 5.0 // 5 seconds
 
@@ -202,6 +250,20 @@ let isModelReady = false
 let diarizationCapabilities: DiarizationCapabilities | null = null
 let diarizationAvailable = false
 let diarizationUnavailableReason: string | null = null
+
+// Diarization health tracking - monitors for repeated failures and emits warnings
+// Note: DiarizationHealthState interface is exported above for use by consumers
+
+let diarizationHealthState: DiarizationHealthState = {
+  hasWarning: false,
+  warningMessage: null,
+  consecutiveFailures: 0,
+  totalFailures: 0,
+  lastFailureReason: null,
+  lastFailureTime: null,
+  isRecoverable: true,
+  recommendation: null
+}
 
 // Speaker auto-registration cache: meetingId -> (speakerLabel -> speakerId)
 const speakerMappingCache = new Map<string, Map<string, string>>()
@@ -527,8 +589,10 @@ async function startPythonProcess(actualSampleRate: number): Promise<{ success: 
   // Default to true to enable speaker diarization by default
   const enableDiarization = config.enableDiarization !== false
   // Lower threshold = more speakers detected (more sensitive to voice differences)
-  // Default 0.5 provides better speaker separation than pyannote's default of 0.7
-  const diarizationThreshold = config.diarizationThreshold ?? 0.5
+  // FIXED: Lowered from 0.5 to 0.30 for better multi-speaker detection during live recording
+  // This matches the streaming diarization service threshold and ensures consistent
+  // speaker detection across both services (typical same-speaker: 0.8-0.95, different: 0.2-0.5)
+  const diarizationThreshold = config.diarizationThreshold ?? 0.30
   const maxSpeakers = config.maxSpeakers ?? 10
 
   // Calculate the buffered audio duration for proper timestamp offset
@@ -863,6 +927,8 @@ function handlePythonMessage(message: PythonMessage): void {
     case 'segment':
       if (message.text && message.text.trim()) {
         // Auto-register speaker if diarization label is present
+        // NOTE: Segments are ALWAYS emitted even when diarization fails
+        // If speaker_fallback is true, the speaker field contains a fallback ID
         let speakerId: string | null = null
         if (message.speaker && currentState.meetingId) {
           speakerId = getOrCreateSpeaker(message.speaker, currentState.meetingId)
@@ -877,6 +943,8 @@ function handlePythonMessage(message: PythonMessage): void {
           is_final: true,
           speaker: message.speaker, // Keep original label for debugging
           speaker_id: speakerId, // Database foreign key
+          speaker_confidence: message.speaker_confidence, // Diarization confidence
+          speaker_fallback: message.speaker_fallback, // True if diarization failed for this segment
         }
         updateState({ segmentCount: currentState.segmentCount + 1 })
         emitSegment(segment)
@@ -886,7 +954,8 @@ function handlePythonMessage(message: PythonMessage): void {
         console.log(`  Time: ${segment.start.toFixed(2)}s - ${segment.end.toFixed(2)}s`)
         console.log(`  Confidence: ${segment.confidence !== undefined ? segment.confidence.toFixed(2) : 'N/A'}`)
         if (segment.speaker) {
-          console.log(`  Speaker: ${segment.speaker} (ID: ${segment.speaker_id || 'none'})`)
+          const fallbackLabel = segment.speaker_fallback ? ' (FALLBACK)' : ''
+          console.log(`  Speaker: ${segment.speaker} (ID: ${segment.speaker_id || 'none'})${fallbackLabel}`)
         }
         console.log(`  Segment ID: ${segment.id}`)
       }
@@ -961,6 +1030,92 @@ function handlePythonMessage(message: PythonMessage): void {
       })
       // Also emit a warning through the progress event
       emitProgress(currentState.status, 0, `Warning: ${warningMessage}`)
+      break
+
+    case 'diarization_health_warning':
+      // FAULT-TOLERANT: Diarization is experiencing issues but transcription continues
+      // Update health state
+      diarizationHealthState = {
+        hasWarning: true,
+        warningMessage: message.message || 'Speaker identification experiencing issues',
+        consecutiveFailures: message.consecutive_failures || 0,
+        totalFailures: message.total_failures || 0,
+        lastFailureReason: message.last_failure_reason || null,
+        lastFailureTime: message.last_failure_time || null,
+        isRecoverable: message.is_recoverable !== false,
+        recommendation: message.recommendation || null
+      }
+
+      console.warn(`[Live Transcription] DIARIZATION HEALTH WARNING: ${diarizationHealthState.warningMessage}`)
+      console.warn(`[Live Transcription] Consecutive failures: ${diarizationHealthState.consecutiveFailures}, ` +
+                   `Total: ${diarizationHealthState.totalFailures}`)
+      if (diarizationHealthState.recommendation) {
+        console.warn(`[Live Transcription] Recommendation: ${diarizationHealthState.recommendation}`)
+      }
+
+      // Emit health warning event for UI
+      progressEmitter.emit(DIARIZATION_HEALTH_EVENT, {
+        type: 'warning',
+        hasWarning: true,
+        message: diarizationHealthState.warningMessage,
+        consecutiveFailures: diarizationHealthState.consecutiveFailures,
+        totalFailures: diarizationHealthState.totalFailures,
+        lastFailureReason: diarizationHealthState.lastFailureReason,
+        isRecoverable: diarizationHealthState.isRecoverable,
+        recommendation: diarizationHealthState.recommendation
+      })
+
+      // Also emit as progress for backward compatibility
+      emitProgress(
+        currentState.status,
+        0,
+        `Warning: ${diarizationHealthState.warningMessage}`
+      )
+      break
+
+    case 'diarization_health_recovery':
+      // FAULT-TOLERANT: Diarization has recovered from issues
+      const previousWarningState = diarizationHealthState.hasWarning
+
+      diarizationHealthState = {
+        hasWarning: false,
+        warningMessage: null,
+        consecutiveFailures: 0,
+        totalFailures: message.previous_failures || diarizationHealthState.totalFailures,
+        lastFailureReason: null,
+        lastFailureTime: null,
+        isRecoverable: true,
+        recommendation: null
+      }
+
+      if (previousWarningState) {
+        console.log(`[Live Transcription] DIARIZATION HEALTH RECOVERED: ${message.message}`)
+        console.log(`[Live Transcription] Total segments processed: ${message.total_segments_processed || 'unknown'}`)
+
+        // Emit recovery event for UI
+        progressEmitter.emit(DIARIZATION_HEALTH_EVENT, {
+          type: 'recovery',
+          hasWarning: false,
+          message: message.message || 'Speaker identification has recovered',
+          totalSegmentsProcessed: message.total_segments_processed,
+          previousFailures: message.previous_failures
+        })
+
+        // Emit success status
+        emitProgress(
+          currentState.status,
+          0,
+          message.message || 'Speaker identification working normally'
+        )
+      }
+      break
+
+    case 'serialization_error':
+      // FAULT-TOLERANT: JSON serialization error occurred but pipeline continues
+      console.warn(`[Live Transcription] Serialization error (non-fatal): ${message.error}`)
+      console.warn(`[Live Transcription] Original message type: ${message.original_type}`)
+      // Don't emit to UI - these are handled internally and shouldn't interrupt user experience
+      // The pipeline continues with fallback handling
       break
 
     case 'error':
@@ -1620,6 +1775,47 @@ export const liveTranscriptionService = {
   },
 
   /**
+   * Get current diarization health status
+   *
+   * Returns the current health state of the diarization pipeline, including:
+   * - Whether there's an active warning
+   * - Failure counts and reasons
+   * - Recommendations for resolution
+   *
+   * This is part of the fault-tolerant error handling system that ensures
+   * transcription continues even when diarization encounters errors.
+   */
+  getDiarizationHealth(): DiarizationHealthState {
+    return { ...diarizationHealthState }
+  },
+
+  /**
+   * Subscribe to diarization health updates
+   *
+   * Emits events when diarization health changes:
+   * - 'warning': When repeated failures are detected
+   * - 'recovery': When diarization recovers from issues
+   *
+   * This allows the UI to show appropriate warnings to users while
+   * maintaining confidence that transcription continues uninterrupted.
+   */
+  onDiarizationHealth(callback: (event: {
+    type: 'warning' | 'recovery'
+    hasWarning: boolean
+    message: string
+    consecutiveFailures?: number
+    totalFailures?: number
+    lastFailureReason?: string | null
+    isRecoverable?: boolean
+    recommendation?: string | null
+    totalSegmentsProcessed?: number
+    previousFailures?: number
+  }) => void): () => void {
+    progressEmitter.on(DIARIZATION_HEALTH_EVENT, callback)
+    return () => { progressEmitter.off(DIARIZATION_HEALTH_EVENT, callback) }
+  },
+
+  /**
    * Force reset the transcription state
    * Use this to recover from stuck states (e.g., when error occurs and state doesn't reset properly)
    */
@@ -1661,6 +1857,18 @@ export const liveTranscriptionService = {
     diarizationCapabilities = null
     diarizationAvailable = false
     diarizationUnavailableReason = null
+
+    // Reset diarization health state
+    diarizationHealthState = {
+      hasWarning: false,
+      warningMessage: null,
+      consecutiveFailures: 0,
+      totalFailures: 0,
+      lastFailureReason: null,
+      lastFailureTime: null,
+      isRecoverable: true,
+      recommendation: null
+    }
 
     updateState({
       status: 'idle',
@@ -1815,6 +2023,18 @@ export function resetLiveTranscriptionState(): void {
   diarizationCapabilities = null
   diarizationAvailable = false
   diarizationUnavailableReason = null
+
+  // Reset diarization health state
+  diarizationHealthState = {
+    hasWarning: false,
+    warningMessage: null,
+    consecutiveFailures: 0,
+    totalFailures: 0,
+    lastFailureReason: null,
+    lastFailureTime: null,
+    isRecoverable: true,
+    recommendation: null
+  }
 
   // Clear speaker mappings for the current meeting
   if (currentState.meetingId) {

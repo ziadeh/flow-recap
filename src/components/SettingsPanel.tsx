@@ -13,12 +13,14 @@ import {
   Mic,
   Brain,
   Users,
+  Bug,
   ChevronDown,
   ChevronUp
 } from 'lucide-react'
 import { AudioDeviceSettings } from './AudioDeviceSettings'
 import { LLMSettings } from './LLMSettings'
 import { DiarizationSettings, type DiarizationUserSettings } from './DiarizationSettings'
+import { DiarizationDebugPanel } from './DiarizationDebugPanel'
 
 // ============================================================================
 // Types
@@ -177,6 +179,18 @@ export function SettingsPanel({
         onToggle={() => toggleSection('llm')}
       >
         <LLMSettings onSettingsChange={handleLLMSettingsChange} />
+      </CollapsibleSection>
+
+      {/* Diarization Debug Section */}
+      <CollapsibleSection
+        id="debug"
+        title="Diarization Debug"
+        description="Diagnose speaker detection issues during live recording"
+        icon={<Bug className="h-5 w-5 text-purple-600" />}
+        isExpanded={expandedSections.has('debug')}
+        onToggle={() => toggleSection('debug')}
+      >
+        <DiarizationDebugPanel />
       </CollapsibleSection>
 
       {/* Footer Info */}

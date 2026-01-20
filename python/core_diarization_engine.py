@@ -260,8 +260,9 @@ class CoreDiarizationEngine:
         window_size: float = 2.0,
         hop_size: float = 0.5,
         # Lower threshold = more speakers detected (more sensitive to voice differences)
-        # Default 0.4 provides better speaker separation for similar-sounding voices
-        similarity_threshold: float = 0.4,
+        # FIXED: Lowered from 0.4 to 0.30 for better multi-speaker detection during live recording
+        # Typical: same-speaker similarity 0.8-0.95, different speakers 0.2-0.5
+        similarity_threshold: float = 0.30,
         device: Optional[str] = None
     ):
         """
@@ -308,11 +309,45 @@ class CoreDiarizationEngine:
         self._embedding_model = None
         self._embedding_dim = 512  # pyannote embedding dimension
 
+        # =====================================================================
+        # Persistent Speaker Profile Cache (maintains identity across chunks)
+        # =====================================================================
+
         # Speaker tracking state
         self._speaker_centroids: Dict[str, np.ndarray] = {}
         self._speaker_counts: Dict[str, int] = defaultdict(int)
         self._next_speaker_id = 0
         self._current_speaker: Optional[str] = None
+
+        # Embedding history per speaker for robust profile building
+        self._speaker_embedding_history: Dict[str, List[np.ndarray]] = defaultdict(list)
+
+        # Track profile stability (stable after min_profile_embeddings)
+        self._speaker_profile_stable: Dict[str, bool] = defaultdict(bool)
+
+        # Re-identification threshold: matches above this are definitely same speaker
+        self._reidentification_threshold = 0.85
+
+        # Minimum match threshold for cold-start protection
+        # INCREASED from 0.25 to 0.35 to allow more new speaker creation during cold-start
+        self._minimum_match_threshold = 0.35
+
+        # NEW: Threshold below which a voice is DEFINITELY a different speaker
+        # even during cold-start. If similarity is below this, always create new speaker
+        # INCREASED from 0.20 to 0.30 because processed audio often has higher baseline similarity
+        self._definite_new_speaker_threshold = 0.30
+
+        # NEW: Threshold for creating new speakers after cold-start is complete
+        self._new_speaker_threshold = 0.40
+
+        # Maximum centroid history to keep
+        self._max_centroid_history = 50
+
+        # Minimum embeddings for stable profile
+        self._min_profile_embeddings = 3
+
+        # Centroid decay factor
+        self._centroid_decay_factor = 0.9
 
         # Audio buffer for streaming
         self._audio_buffer = np.array([], dtype=np.float32)
@@ -320,6 +355,23 @@ class CoreDiarizationEngine:
 
         # Track all segments
         self._all_segments: List[SpeakerSegment] = []
+
+        # =====================================================================
+        # ADAPTIVE THRESHOLD CALIBRATION STATE
+        # =====================================================================
+        # Track similarity scores during calibration phase to detect processed audio
+        self._calibration_similarities: List[float] = []
+        self._is_calibrated = False
+        self._is_processed_audio = False
+        self._calibration_segments = 8
+        self._processed_audio_min_similarity = 0.55
+        self._processed_audio_threshold_boost = 0.25
+
+        # Effective thresholds (may be adjusted after calibration)
+        self._effective_similarity_threshold = similarity_threshold
+        self._effective_definite_new_threshold = self._definite_new_speaker_threshold
+        self._effective_new_speaker_threshold = self._new_speaker_threshold
+        self._effective_minimum_match_threshold = self._minimum_match_threshold
 
         # Initialize the model
         self._initialize_model()
@@ -463,9 +515,80 @@ class CoreDiarizationEngine:
             return 0.0
         return float(np.dot(a, b) / (norm_a * norm_b))
 
+    def _calibrate_thresholds(self, similarity: float) -> None:
+        """
+        Calibrate thresholds during the cold-start phase to detect processed audio.
+
+        This method tracks similarity scores during the first N segments.
+        If the minimum similarity observed is above a threshold, we're likely
+        dealing with processed/compressed audio and need to increase thresholds.
+
+        The key insight is:
+        - For live microphone audio: different speakers have similarity 0.2-0.5
+        - For processed audio: different speakers have similarity 0.5-0.8
+
+        If we see consistently high similarities in early segments, we boost thresholds.
+        """
+        if self._is_calibrated:
+            return
+
+        # Record this similarity for calibration
+        self._calibration_similarities.append(similarity)
+
+        # Wait until we have enough samples
+        if len(self._calibration_similarities) < self._calibration_segments:
+            return
+
+        # Perform calibration
+        min_similarity = min(self._calibration_similarities)
+        avg_similarity = sum(self._calibration_similarities) / len(self._calibration_similarities)
+
+        # Log calibration results
+        print(f"[CoreDiarization CALIBRATION] Completed with {len(self._calibration_similarities)} samples: "
+              f"min_sim={min_similarity:.3f}, avg_sim={avg_similarity:.3f}, "
+              f"threshold_for_processed={self._processed_audio_min_similarity}",
+              file=sys.stderr, flush=True)
+
+        # Detect processed audio: if minimum similarity is high, audio is likely processed
+        if min_similarity >= self._processed_audio_min_similarity:
+            self._is_processed_audio = True
+
+            # Boost all thresholds for processed audio
+            boost = self._processed_audio_threshold_boost
+
+            self._effective_similarity_threshold = self.similarity_threshold + boost
+            self._effective_definite_new_threshold = self._definite_new_speaker_threshold + boost
+            self._effective_new_speaker_threshold = self._new_speaker_threshold + boost
+            self._effective_minimum_match_threshold = self._minimum_match_threshold + boost
+
+            print(f"[CoreDiarization CALIBRATION] ⚠️ PROCESSED AUDIO DETECTED "
+                  f"(min_sim={min_similarity:.3f} >= {self._processed_audio_min_similarity})",
+                  file=sys.stderr, flush=True)
+            print(f"[CoreDiarization CALIBRATION] Adjusted thresholds: "
+                  f"similarity={self._effective_similarity_threshold:.2f}, "
+                  f"definite_new={self._effective_definite_new_threshold:.2f}, "
+                  f"new_speaker={self._effective_new_speaker_threshold:.2f}, "
+                  f"min_match={self._effective_minimum_match_threshold:.2f}",
+                  file=sys.stderr, flush=True)
+        else:
+            print(f"[CoreDiarization CALIBRATION] ✓ Live audio detected "
+                  f"(min_sim={min_similarity:.3f} < {self._processed_audio_min_similarity}), "
+                  f"using default thresholds",
+                  file=sys.stderr, flush=True)
+
+        self._is_calibrated = True
+
     def _find_or_create_speaker(self, embedding: np.ndarray) -> Tuple[str, float]:
         """
         Find the best matching speaker or create a new one.
+
+        Implements speaker re-identification logic to ensure stable speaker IDs:
+        1. If similarity >= 0.85 (re-identification threshold), always match to existing speaker
+        2. If similarity >= standard threshold, match to existing speaker
+        3. If similarity < threshold, create new speaker (with cold-start protection)
+
+        Uses ADAPTIVE THRESHOLDS that are calibrated during cold-start to detect
+        processed/compressed audio and adjust accordingly.
 
         Args:
             embedding: Speaker embedding vector
@@ -483,40 +606,157 @@ class CoreDiarizationEngine:
                 best_similarity = similarity
                 best_speaker = speaker_id
 
-        # Decide if this is a new speaker or existing
-        if best_speaker is None or best_similarity < self.similarity_threshold:
-            # Check if we can create a new speaker
-            if len(self._speaker_centroids) < self.max_speakers:
-                # Create new speaker
+        # =====================================================================
+        # ADAPTIVE THRESHOLD CALIBRATION
+        # =====================================================================
+        # Feed similarity scores to the calibration system during cold-start.
+        # This detects processed audio and adjusts thresholds accordingly.
+        # =====================================================================
+        if not self._is_calibrated and best_similarity > 0:
+            self._calibrate_thresholds(best_similarity)
+
+        # Check if this is a high-confidence re-identification
+        is_reidentification = best_similarity >= self._reidentification_threshold
+
+        # Case 1: High-confidence re-identification (>= 0.85)
+        # This is definitely the same speaker - always match
+        if is_reidentification and best_speaker is not None:
+            self._update_centroid(best_speaker, embedding)
+            return best_speaker, best_similarity
+
+        # Case 2: Normal threshold match (using EFFECTIVE threshold)
+        if best_speaker is not None and best_similarity >= self._effective_similarity_threshold:
+            self._update_centroid(best_speaker, embedding)
+            return best_speaker, best_similarity
+
+        # Case 3: Below threshold - potentially new speaker
+        if len(self._speaker_centroids) < self.max_speakers:
+            # =====================================================================
+            # IMPROVED COLD-START PROTECTION (FIX for Speaker_0 issue)
+            # Uses EFFECTIVE thresholds that adapt to processed audio
+            # =====================================================================
+
+            has_unstable_profiles = any(
+                not stable for stable in self._speaker_profile_stable.values()
+            )
+
+            # ALWAYS-ON LOGGING for debugging speaker decisions
+            is_processed = " [PROCESSED]" if self._is_processed_audio else ""
+            print(f"[CoreDiarization]{is_processed} DECISION: sim={best_similarity:.3f}, "
+                  f"best={best_speaker}, speakers={list(self._speaker_centroids.keys())}, "
+                  f"unstable={has_unstable_profiles}, "
+                  f"thresholds=(def={self._effective_definite_new_threshold:.2f}, "
+                  f"new={self._effective_new_speaker_threshold:.2f}, "
+                  f"min={self._effective_minimum_match_threshold:.2f})",
+                  file=sys.stderr, flush=True)
+
+            # CRITICAL FIX: If similarity is VERY low, this is definitely a different speaker
+            if best_similarity < self._effective_definite_new_threshold:
                 speaker_id = f"SPEAKER_{self._next_speaker_id}"
                 self._next_speaker_id += 1
                 self._speaker_centroids[speaker_id] = embedding.copy()
                 self._speaker_counts[speaker_id] = 1
-                confidence = 1.0  # New speaker, high confidence
+                self._speaker_embedding_history[speaker_id] = [embedding.copy()]
+                self._speaker_profile_stable[speaker_id] = False
+                confidence = 1.0
 
-                print(f"[CoreDiarization] New speaker detected: {speaker_id}", file=sys.stderr, flush=True)
+                print(f"[CoreDiarization] → NEW (definite): {speaker_id} "
+                      f"(sim {best_similarity:.3f} < {self._effective_definite_new_threshold})",
+                      file=sys.stderr, flush=True)
                 return speaker_id, confidence
-            else:
-                # Max speakers reached, assign to closest
-                speaker_id = best_speaker if best_speaker else f"SPEAKER_{self._next_speaker_id - 1}"
-                self._update_centroid(speaker_id, embedding)
-                return speaker_id, best_similarity
+
+            elif best_similarity < self._effective_new_speaker_threshold and not has_unstable_profiles:
+                # Similarity is below NEW_SPEAKER_THRESHOLD and profiles are stable
+                speaker_id = f"SPEAKER_{self._next_speaker_id}"
+                self._next_speaker_id += 1
+                self._speaker_centroids[speaker_id] = embedding.copy()
+                self._speaker_counts[speaker_id] = 1
+                self._speaker_embedding_history[speaker_id] = [embedding.copy()]
+                self._speaker_profile_stable[speaker_id] = False
+                confidence = 1.0
+
+                print(f"[CoreDiarization] → NEW (below threshold): {speaker_id} "
+                      f"(sim {best_similarity:.3f} < {self._effective_new_speaker_threshold})",
+                      file=sys.stderr, flush=True)
+                return speaker_id, confidence
+
+            elif (has_unstable_profiles and
+                  best_speaker is not None and
+                  best_similarity >= self._effective_minimum_match_threshold):
+                # During cold-start with moderate-high similarity, be conservative
+                self._update_centroid(best_speaker, embedding)
+
+                print(f"[CoreDiarization] → COLD-START MATCH: {best_speaker} "
+                      f"(sim {best_similarity:.3f} >= {self._effective_minimum_match_threshold})",
+                      file=sys.stderr, flush=True)
+                return best_speaker, best_similarity
+
+            # Create new speaker - fallback case
+            speaker_id = f"SPEAKER_{self._next_speaker_id}"
+            self._next_speaker_id += 1
+            self._speaker_centroids[speaker_id] = embedding.copy()
+            self._speaker_counts[speaker_id] = 1
+            self._speaker_embedding_history[speaker_id] = [embedding.copy()]
+            self._speaker_profile_stable[speaker_id] = False
+            confidence = 1.0
+
+            print(f"[CoreDiarization] → NEW (fallback): {speaker_id}", file=sys.stderr, flush=True)
+            return speaker_id, confidence
         else:
-            # Existing speaker
-            self._update_centroid(best_speaker, embedding)
-            return best_speaker, best_similarity
+            # Max speakers reached, assign to closest
+            speaker_id = best_speaker if best_speaker else f"SPEAKER_{self._next_speaker_id - 1}"
+            if best_speaker:
+                self._update_centroid(speaker_id, embedding)
+            return speaker_id, best_similarity if best_similarity > 0 else 0.5
 
     def _update_centroid(self, speaker_id: str, embedding: np.ndarray) -> None:
-        """Update speaker centroid with new embedding using running mean."""
+        """
+        Update speaker centroid with new embedding using incremental weighted averaging.
+
+        Maintains a persistent speaker profile by:
+        1. Accumulating embeddings in the history
+        2. Using temporal decay weighting for centroid calculation
+        3. Marking profiles as stable after enough samples
+        """
         if speaker_id not in self._speaker_centroids:
             self._speaker_centroids[speaker_id] = embedding.copy()
             self._speaker_counts[speaker_id] = 1
+            self._speaker_embedding_history[speaker_id] = [embedding.copy()]
+            return
+
+        # Add to embedding history
+        self._speaker_embedding_history[speaker_id].append(embedding.copy())
+
+        # Trim history if it exceeds the limit
+        if len(self._speaker_embedding_history[speaker_id]) > self._max_centroid_history:
+            self._speaker_embedding_history[speaker_id] = \
+                self._speaker_embedding_history[speaker_id][-self._max_centroid_history:]
+
+        # Calculate temporally-weighted centroid
+        history = self._speaker_embedding_history[speaker_id]
+        n = len(history)
+
+        if n == 1:
+            self._speaker_centroids[speaker_id] = embedding.copy()
         else:
-            count = self._speaker_counts[speaker_id]
-            self._speaker_centroids[speaker_id] = (
-                self._speaker_centroids[speaker_id] * count + embedding
-            ) / (count + 1)
-            self._speaker_counts[speaker_id] = count + 1
+            # Apply exponential decay weights (most recent = highest weight)
+            weights = np.array([
+                self._centroid_decay_factor ** (n - 1 - i) for i in range(n)
+            ])
+            weights = weights / weights.sum()  # Normalize
+
+            # Compute weighted centroid
+            weighted_centroid = np.zeros_like(embedding)
+            for i, emb in enumerate(history):
+                weighted_centroid += weights[i] * emb
+
+            self._speaker_centroids[speaker_id] = weighted_centroid
+
+        self._speaker_counts[speaker_id] = n
+
+        # Mark profile as stable once we have enough samples
+        if n >= self._min_profile_embeddings and not self._speaker_profile_stable.get(speaker_id, False):
+            self._speaker_profile_stable[speaker_id] = True
 
     def process_audio_chunk(self, audio_data: np.ndarray) -> List[SpeakerSegment]:
         """
@@ -764,6 +1004,8 @@ class CoreDiarizationEngine:
         """Reset the engine state for a new session."""
         self._speaker_centroids.clear()
         self._speaker_counts.clear()
+        self._speaker_embedding_history.clear()
+        self._speaker_profile_stable.clear()
         self._next_speaker_id = 0
         self._current_speaker = None
         self._audio_buffer = np.array([], dtype=np.float32)
@@ -771,6 +1013,20 @@ class CoreDiarizationEngine:
         self._all_segments.clear()
 
         print("[CoreDiarization] Engine state reset", file=sys.stderr, flush=True)
+
+    def get_speaker_profile_info(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get detailed information about each speaker's profile.
+
+        Returns information about profile stability and embedding count.
+        """
+        profiles = {}
+        for speaker_id in self._speaker_centroids.keys():
+            profiles[speaker_id] = {
+                "embedding_count": self._speaker_counts.get(speaker_id, 0),
+                "is_stable": self._speaker_profile_stable.get(speaker_id, False)
+            }
+        return profiles
 
 
 # ============================================================================

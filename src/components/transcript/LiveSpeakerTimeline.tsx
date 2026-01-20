@@ -39,6 +39,8 @@ export interface LiveSpeakerTimelineProps {
   onSegmentClick?: (segment: LiveTranscriptSegment) => void
   /** Additional class names */
   className?: string
+  /** Show debug info even when no speakers detected */
+  showDebugWhenEmpty?: boolean
 }
 
 interface SpeakerTrack {
@@ -210,6 +212,7 @@ export const LiveSpeakerTimeline = memo(function LiveSpeakerTimeline({
   expanded: initialExpanded = true,
   onSegmentClick,
   className,
+  showDebugWhenEmpty = false,
 }: LiveSpeakerTimelineProps) {
   const [expanded, setExpanded] = useState(initialExpanded)
 
@@ -227,7 +230,7 @@ export const LiveSpeakerTimeline = memo(function LiveSpeakerTimeline({
     return map
   }, [speakers])
 
-  // Create speaker tracks from segments
+  // Create speaker tracks from segments - memoize with stable reference
   const tracks = useMemo(
     () => createSpeakerTracks(segments, speakerNames),
     [segments, speakerNames]
@@ -239,8 +242,35 @@ export const LiveSpeakerTimeline = memo(function LiveSpeakerTimeline({
   // Get unique speaker count
   const speakerCount = tracks.length
 
-  // Don't render if no speakers detected yet
+  // Debug: Log render info
+  useEffect(() => {
+    console.log('[LiveSpeakerTimeline] Render:', {
+      segmentsCount: segments.length,
+      tracksCount: tracks.length,
+      speakerNamesSize: speakerNames.size,
+      recordingDurationMs,
+    })
+  }, [segments.length, tracks.length, speakerNames.size, recordingDurationMs])
+
+  // Show debug placeholder when no speakers detected but debug mode is enabled
   if (speakerCount === 0) {
+    if (showDebugWhenEmpty) {
+      return (
+        <div
+          className={cn(
+            'bg-muted/30 border border-border rounded-lg overflow-hidden p-4',
+            className
+          )}
+          data-testid="live-speaker-timeline-empty"
+        >
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Users className="w-4 h-4" />
+            <span>Waiting for speaker data...</span>
+            <span className="text-xs">({segments.length} segments received)</span>
+          </div>
+        </div>
+      )
+    }
     return null
   }
 

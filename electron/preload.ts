@@ -31,12 +31,17 @@ import type {
   VirtualCableType,
   AudioDiagnosticResult,
   AutoFixResult,
+  AudioSetupRecommendation,
   DualRecordingConfig,
   DualRecordingState,
   StartDualRecordingResult,
   StopDualRecordingResult,
   SystemAudioCaptureCapabilities,
-  AudioSource
+  AudioSource,
+  MeetingParticipationAnalytics,
+  ParticipationTrend,
+  ParticipationReport,
+  ParticipationReportOptions
 } from '../src/types/database'
 import type {
   TranscriptionConfig,
@@ -226,6 +231,32 @@ const databaseAPI = {
       ipcRenderer.invoke('db:speakers:delete', id),
     getUser: (): Promise<Speaker | null> =>
       ipcRenderer.invoke('db:speakers:getUser')
+  },
+
+  // ===== Speaker Participation Analytics =====
+  speakerParticipation: {
+    // Get detailed participation analytics for a single meeting
+    getMeetingParticipation: (meetingId: string): Promise<MeetingParticipationAnalytics | null> =>
+      ipcRenderer.invoke('speakerParticipation:getMeetingParticipation', meetingId),
+    // Get quick stats for dashboard display
+    getQuickStats: (meetingId: string): Promise<{
+      speakerCount: number
+      totalDurationMs: number
+      isBalanced: boolean
+      dominantSpeakerName: string | null
+      dominantSpeakerPercentage: number | null
+    } | null> =>
+      ipcRenderer.invoke('speakerParticipation:getQuickStats', meetingId),
+    // Get participation trends over time
+    getTrends: (
+      startDate: string,
+      endDate: string,
+      grouping?: 'day' | 'week' | 'month'
+    ): Promise<ParticipationTrend[]> =>
+      ipcRenderer.invoke('speakerParticipation:getTrends', startDate, endDate, grouping),
+    // Generate a comprehensive participation report
+    generateReport: (options?: ParticipationReportOptions): Promise<ParticipationReport> =>
+      ipcRenderer.invoke('speakerParticipation:generateReport', options)
   },
 
   // ===== Meeting Speaker Names (meeting-specific speaker name overrides) =====
@@ -439,7 +470,11 @@ const audioDeviceAPI = {
 
   // Attempt to auto-fix common audio issues
   attemptAutoFix: (issue: string): Promise<AutoFixResult> =>
-    ipcRenderer.invoke('audio:devices:attemptAutoFix', issue)
+    ipcRenderer.invoke('audio:devices:attemptAutoFix', issue),
+
+  // Get smart device recommendations based on detected hardware
+  getRecommendations: (): Promise<AudioSetupRecommendation> =>
+    ipcRenderer.invoke('audio:devices:getRecommendations')
 }
 
 // ============================================================================
@@ -1027,6 +1062,119 @@ const streamingDiarizationAPI = {
     ipcRenderer.on('streamingDiarization:batchedUpdate', handler)
     return () => {
       ipcRenderer.removeListener('streamingDiarization:batchedUpdate', handler)
+    }
+  }
+}
+
+// ============================================================================
+// Diarization Debug API (Comprehensive debug logging for diagnosing speaker issues)
+// ============================================================================
+
+export interface AudioChunkMetrics {
+  timestamp: number
+  chunkSize: number
+  sampleRate: number
+  rmsLevel: number
+  peakLevel: number
+  sentToDiarization: boolean
+  processingTimeMs?: number
+}
+
+export interface SpeakerSegmentDebug {
+  timestamp: number
+  segmentId: string
+  speaker: string
+  startTime: number
+  endTime: number
+  confidence: number
+  isFinal: boolean
+  wasRetroactivelyCorrected?: boolean
+  processingLatencyMs?: number
+}
+
+export interface SpeakerChangeDebug {
+  timestamp: number
+  time: number
+  fromSpeaker: string | null
+  toSpeaker: string
+  confidence: number
+  eventFired: boolean
+  sentToRenderer: boolean
+}
+
+export interface IPCEventDebug {
+  timestamp: number
+  eventName: string
+  eventData: any
+  success: boolean
+  error?: string
+}
+
+export interface PyAnnoteOutputDebug {
+  timestamp: number
+  outputType: 'embedding' | 'clustering' | 'speaker_change' | 'segment' | 'stats' | 'ready' | 'error'
+  success: boolean
+  data?: any
+  error?: string
+  processingTimeMs?: number
+}
+
+export interface DebugSnapshot {
+  timestamp: number
+  sessionId: string | null
+  meetingId: string | null
+  isActive: boolean
+  speakersDetected: string[]
+  currentSpeaker: string | null
+  lastSpeakerChangeTimestamp: number | null
+  speakerChangeCount: number
+  totalAudioChunksProcessed: number
+  totalAudioDurationSec: number
+  lastAudioChunkTimestamp: number | null
+  averageRmsLevel: number
+  averagePeakLevel: number
+  diarizationStatus: string
+  coldStartComplete: boolean
+  totalSegmentsEmitted: number
+  lastSegmentTimestamp: number | null
+  totalIPCEventsEmitted: number
+  lastIPCEventTimestamp: number | null
+  ipcErrors: number
+  averageConfidence: number
+  minConfidence: number
+  maxConfidence: number
+  recentAudioChunks: AudioChunkMetrics[]
+  recentSpeakerSegments: SpeakerSegmentDebug[]
+  recentSpeakerChanges: SpeakerChangeDebug[]
+  recentIPCEvents: IPCEventDebug[]
+  recentPyAnnoteOutputs: PyAnnoteOutputDebug[]
+}
+
+const diarizationDebugAPI = {
+  // Get current debug snapshot
+  getSnapshot: (): Promise<DebugSnapshot> =>
+    ipcRenderer.invoke('diarizationDebug:getSnapshot'),
+
+  // Enable debug logging
+  enable: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('diarizationDebug:enable'),
+
+  // Disable debug logging
+  disable: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('diarizationDebug:disable'),
+
+  // Check if debug is enabled
+  isEnabled: (): Promise<boolean> =>
+    ipcRenderer.invoke('diarizationDebug:isEnabled'),
+
+  // Subscribe to debug snapshot updates
+  onSnapshot: (callback: (snapshot: DebugSnapshot) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, snapshot: DebugSnapshot) => {
+      callback(snapshot)
+    }
+    ipcRenderer.on('diarizationDebug:snapshot', handler)
+    return () => {
+      ipcRenderer.removeListener('diarizationDebug:snapshot', handler)
     }
   }
 }
@@ -4892,6 +5040,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Streaming Diarization API (real-time speaker detection during live recording)
   streamingDiarization: streamingDiarizationAPI,
 
+  // Diarization Debug API (comprehensive debug logging for diagnosing speaker issues)
+  diarizationDebug: diarizationDebugAPI,
+
   // Diarization Failure API (explicit failure detection and notification)
   diarizationFailure: diarizationFailureAPI,
 
@@ -5007,6 +5158,7 @@ declare global {
       diarization: typeof diarizationAPI
       coreDiarization: typeof coreDiarizationAPI
       streamingDiarization: typeof streamingDiarizationAPI
+      diarizationDebug: typeof diarizationDebugAPI
       diarizationFailure: typeof diarizationFailureAPI
       diarizationHealth: typeof diarizationHealthAPI
       pythonValidation: typeof pythonValidationAPI
