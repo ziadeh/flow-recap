@@ -189,6 +189,38 @@ def output_speaker_segment(speaker: str, start: float, end: float, confidence: f
     output_json(result)
 
 
+def output_speaker_embedding(
+    embedding: np.ndarray,
+    start: float,
+    end: float,
+    speaker: str = None,
+    confidence: float = None,
+    extraction_model: str = "pyannote/embedding"
+) -> None:
+    """
+    Output a speaker embedding for persistent storage in the database.
+
+    This enables consistent speaker identification across chunks and meetings.
+    The embedding is a numerical representation of voice characteristics.
+    """
+    result = {
+        "type": "speaker_embedding",
+        "embedding": embedding.tolist(),  # Convert numpy array to list for JSON
+        "dimension": int(embedding.shape[0]),
+        "start": float(start),
+        "end": float(end),
+        "extraction_model": extraction_model
+    }
+
+    if speaker is not None:
+        result["speaker"] = speaker
+
+    if confidence is not None:
+        result["confidence"] = float(confidence)
+
+    output_json(result)
+
+
 def output_speaker_change(from_speaker: Optional[str], to_speaker: str, time: float) -> None:
     """Output a speaker change event."""
     output_json({
@@ -964,6 +996,7 @@ class LiveDiarizer:
     - High-confidence re-identification (similarity > 0.85) to prevent ID reset
     - Incremental centroid updates for robust speaker profiles
     - Cold-start protection to prevent over-splitting early in recording
+    - Embedding output for persistent database storage
     """
 
     def __init__(
@@ -979,7 +1012,9 @@ class LiveDiarizer:
         # Centroid decay parameters for better speaker separation
         centroid_decay_factor: float = 0.9,
         # Increased from 20 to 50 for better profile accumulation and stability
-        max_centroid_history: int = 50
+        max_centroid_history: int = 50,
+        # Enable persistent embedding output for database storage
+        output_embeddings: bool = True
     ):
         """
         Initialize live diarizer with persistent speaker profiles.
@@ -995,12 +1030,14 @@ class LiveDiarizer:
             device: Device for inference ('cuda' or 'cpu')
             centroid_decay_factor: Decay factor for temporal weighting (0-1)
             max_centroid_history: Maximum embeddings to keep per speaker (50 for stability)
+            output_embeddings: If True, output embeddings for database storage
         """
         self.sample_rate = sample_rate
         self.segment_duration = segment_duration
         self.hop_duration = hop_duration
         self.segment_samples = int(segment_duration * sample_rate)
         self.hop_samples = int(hop_duration * sample_rate)
+        self.output_embeddings = output_embeddings
 
         # Initialize components with increased history for profile stability
         self.embedding_extractor = SpeakerEmbeddingExtractor(device=device)
@@ -1070,6 +1107,23 @@ class LiveDiarizer:
                 # Output segment
                 output_speaker_segment(speaker_id, start_time, end_time, confidence)
 
+                # Output embedding for persistent storage (if enabled)
+                if self.output_embeddings:
+                    extraction_model = self.embedding_extractor.backend or "pyannote/embedding"
+                    if extraction_model == "pyannote":
+                        extraction_model = "pyannote/embedding"
+                    elif extraction_model == "speechbrain":
+                        extraction_model = "speechbrain/spkrec-ecapa-voxceleb"
+
+                    output_speaker_embedding(
+                        embedding=embedding,
+                        start=start_time,
+                        end=end_time,
+                        speaker=speaker_id,
+                        confidence=confidence,
+                        extraction_model=extraction_model
+                    )
+
             # Slide window
             self.audio_buffer = self.audio_buffer[self.hop_samples:]
             self.processed_samples += self.hop_samples
@@ -1099,6 +1153,23 @@ class LiveDiarizer:
             )
 
             output_speaker_segment(speaker_id, start_time, end_time, confidence)
+
+            # Output embedding for persistent storage (if enabled)
+            if self.output_embeddings:
+                extraction_model = self.embedding_extractor.backend or "pyannote/embedding"
+                if extraction_model == "pyannote":
+                    extraction_model = "pyannote/embedding"
+                elif extraction_model == "speechbrain":
+                    extraction_model = "speechbrain/spkrec-ecapa-voxceleb"
+
+                output_speaker_embedding(
+                    embedding=embedding,
+                    start=start_time,
+                    end=end_time,
+                    speaker=speaker_id,
+                    confidence=confidence,
+                    extraction_model=extraction_model
+                )
 
             # Ensure all values are Python native types for JSON serialization
             return [{
@@ -1307,6 +1378,20 @@ def main():
         help="Device to use (default: auto-detect)"
     )
 
+    parser.add_argument(
+        "--output-embeddings",
+        action="store_true",
+        default=True,
+        help="Output speaker embeddings for persistent storage (default: True)"
+    )
+
+    parser.add_argument(
+        "--no-output-embeddings",
+        dest="output_embeddings",
+        action="store_false",
+        help="Disable embedding output"
+    )
+
     args = parser.parse_args()
 
     # Check for available backends
@@ -1330,7 +1415,8 @@ def main():
         hop_duration=args.hop_duration,
         similarity_threshold=args.similarity_threshold,
         max_speakers=args.max_speakers,
-        device=device
+        device=device,
+        output_embeddings=args.output_embeddings
     )
 
     output_json({
@@ -1341,7 +1427,8 @@ def main():
         "segment_duration": args.segment_duration,
         "hop_duration": args.hop_duration,
         "similarity_threshold": args.similarity_threshold,
-        "max_speakers": args.max_speakers
+        "max_speakers": args.max_speakers,
+        "output_embeddings": args.output_embeddings
     })
 
     # Start processing

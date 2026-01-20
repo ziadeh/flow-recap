@@ -59,10 +59,10 @@ const nativeModules = [
   'electron-updater',
 
   // Environment configuration
-  'dotenv',
+  'dotenv'
 
-  // UUID generation (uses crypto)
-  'uuid'
+  // Note: 'uuid' was removed from this list because it's a pure JavaScript package
+  // that can be safely bundled. It does not contain native .node bindings.
 ]
 
 // Electron-specific module patterns that need to be externalized

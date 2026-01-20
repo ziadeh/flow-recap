@@ -19,6 +19,8 @@ import type { MandatoryDiarizationSegment } from './diarizationOutputSchema'
 import { settingsService } from './settingsService'
 import { speakerNameDetectionService } from './speakerNameDetectionService'
 import { pythonEnvironment } from './pythonEnvironment'
+import { getSpeakerRecognitionIntegrationService } from './speakerRecognitionIntegrationService'
+import type { EmbeddingEvent } from './speakerRecognitionIntegrationService'
 
 // Electron app is imported dynamically to support testing outside Electron context
 let app: { isPackaged?: boolean } | undefined
@@ -166,7 +168,7 @@ export interface DiarizationHealthState {
 
 // Message types from Python process
 interface PythonMessage {
-  type: 'ready' | 'status' | 'segment' | 'error' | 'complete' | 'speaker_segment' | 'speaker_change' | 'diarization_available' | 'diarization_unavailable' | 'diarization_health_warning' | 'diarization_health_recovery' | 'serialization_error'
+  type: 'ready' | 'status' | 'segment' | 'error' | 'complete' | 'speaker_segment' | 'speaker_change' | 'speaker_embedding' | 'diarization_available' | 'diarization_unavailable' | 'diarization_health_warning' | 'diarization_health_recovery' | 'serialization_error'
   message?: string
   text?: string
   start?: number
@@ -179,6 +181,10 @@ interface PythonMessage {
   code?: string
   total_seconds?: number
   buffered_seconds?: number
+  // Speaker embedding fields
+  embedding?: number[]
+  dimension?: number
+  extraction_model?: string
   // VAD and filtering status fields
   vad_enabled?: boolean
   silero_vad_available?: boolean
@@ -267,6 +273,24 @@ let diarizationHealthState: DiarizationHealthState = {
 
 // Speaker auto-registration cache: meetingId -> (speakerLabel -> speakerId)
 const speakerMappingCache = new Map<string, Map<string, string>>()
+
+// Speaker recognition service instance - lazily initialized to avoid database access before initialization
+let speakerRecognitionService: ReturnType<typeof getSpeakerRecognitionIntegrationService> | null = null
+
+function getLazySpeakerRecognitionService() {
+  if (!speakerRecognitionService) {
+    speakerRecognitionService = getSpeakerRecognitionIntegrationService()
+  }
+  return speakerRecognitionService
+}
+
+// Pending transcript updates waiting for speaker embedding matches
+// Maps Python speaker ID to array of segment IDs that need speaker assignment
+const pendingTranscriptSpeakerUpdates = new Map<string, Array<{
+  segmentId: string
+  pythonSpeakerId: string
+  timestamp: number
+}>>()
 
 // Deferred start state - we wait for the first audio chunk to know the actual sample rate
 let pendingConfig: LiveTranscriptionConfig | null = null
@@ -866,6 +890,78 @@ async function startPythonProcess(actualSampleRate: number): Promise<{ success: 
 }
 
 /**
+ * Handle speaker embedding events from Python for persistent recognition
+ */
+async function handleSpeakerEmbedding(event: EmbeddingEvent): Promise<void> {
+  if (!currentState.meetingId) {
+    console.warn('[Speaker Recognition] No active meeting for embedding')
+    return
+  }
+
+  try {
+    // Process the embedding and match against database
+    const result = await getLazySpeakerRecognitionService().processEmbeddingEvent(event)
+
+    if (!result.success) {
+      console.error('[Speaker Recognition] Failed to process embedding:', result.error)
+      return
+    }
+
+    const { persistentSpeakerId, isNewSpeaker, matchResult } = result
+
+    // Log the matching decision
+    const confidenceLabel = matchResult?.confidence_level || 'unknown'
+    const similarityScore = matchResult?.similarity_score?.toFixed(3) || 'N/A'
+
+    console.log(
+      `[Speaker Recognition] ${event.speaker || 'Unknown'} → ${persistentSpeakerId} ` +
+      `(${isNewSpeaker ? 'NEW' : 'EXISTING'}, sim: ${similarityScore}, conf: ${confidenceLabel})`
+    )
+
+    // Update speaker mapping cache for this session
+    if (event.speaker && persistentSpeakerId) {
+      const pythonLabel = event.speaker
+
+      // Get or create meeting-specific mapping
+      if (!speakerMappingCache.has(currentState.meetingId)) {
+        speakerMappingCache.set(currentState.meetingId, new Map())
+      }
+
+      const meetingSpeakers = speakerMappingCache.get(currentState.meetingId)!
+
+      // Update the mapping to use the persistent database speaker ID
+      if (!meetingSpeakers.has(pythonLabel)) {
+        meetingSpeakers.set(pythonLabel, persistentSpeakerId)
+        console.log(`[Speaker Recognition] Cached mapping: ${pythonLabel} → ${persistentSpeakerId}`)
+      }
+
+      // Update any pending transcript segments with this speaker
+      const pending = pendingTranscriptSpeakerUpdates.get(pythonLabel) || []
+
+      if (pending.length > 0) {
+        console.log(`[Speaker Recognition] Updating ${pending.length} pending segments with speaker ${persistentSpeakerId}`)
+
+        // Update all pending segments (in real implementation, you'd update the database)
+        // For now, we'll just log them since transcript storage happens elsewhere
+        for (const { segmentId, timestamp } of pending) {
+          console.log(`[Speaker Recognition] Segment ${segmentId} at ${timestamp}ms → ${persistentSpeakerId}`)
+        }
+
+        // Clear pending list
+        pendingTranscriptSpeakerUpdates.delete(pythonLabel)
+      }
+    }
+
+    // Emit an event for UI updates (optional)
+    if (isNewSpeaker) {
+      console.log(`[Speaker Recognition] 🆕 New speaker detected: ${persistentSpeakerId}`)
+    }
+  } catch (error) {
+    console.error('[Speaker Recognition] Error processing embedding:', error)
+  }
+}
+
+/**
  * Handle messages from the Python process
  */
 function handlePythonMessage(message: PythonMessage): void {
@@ -986,6 +1082,27 @@ function handlePythonMessage(message: PythonMessage): void {
           }
         }
       }
+      break
+
+    case 'speaker_embedding':
+      // Handle speaker embedding for persistent recognition
+      if (!currentState.meetingId || !message.embedding || !message.extraction_model) {
+        console.warn('[Live Transcription] Invalid speaker embedding event:', message)
+        break
+      }
+
+      handleSpeakerEmbedding({
+        type: 'speaker_embedding',
+        embedding: message.embedding,
+        dimension: message.dimension || message.embedding.length,
+        start: message.start || 0,
+        end: message.end || 0,
+        speaker: message.speaker,
+        confidence: message.confidence,
+        extraction_model: message.extraction_model
+      }).catch(err => {
+        console.error('[Live Transcription] Error handling speaker embedding:', err)
+      })
       break
 
     case 'diarization_available':
@@ -1153,6 +1270,11 @@ export const liveTranscriptionService = {
     }
 
     console.log('[Live Transcription] Starting streaming session for meeting:', meetingId)
+
+    // Initialize speaker recognition session
+    getLazySpeakerRecognitionService().startSession(meetingId)
+    pendingTranscriptSpeakerUpdates.clear()
+    console.log('[Speaker Recognition] Session started for meeting:', meetingId)
 
     // Reset deferred start state
     pendingConfig = config
@@ -1625,6 +1747,12 @@ export const liveTranscriptionService = {
 
     const segmentCount = currentState.segmentCount
 
+    // End speaker recognition session and log statistics
+    const speakerStats = getLazySpeakerRecognitionService().getSessionStats()
+    console.log('[Speaker Recognition] Session ending:', speakerStats)
+    getLazySpeakerRecognitionService().endSession()
+    pendingTranscriptSpeakerUpdates.clear()
+
     // Unsubscribe from audio chunks (both microphone and system audio)
     if (audioChunkUnsubscribe) {
       audioChunkUnsubscribe()
@@ -1822,6 +1950,16 @@ export const liveTranscriptionService = {
   forceReset(): { success: boolean } {
     console.log('[Live Transcription] Force resetting state')
 
+    // End speaker recognition session if active
+    if (currentState.meetingId && speakerRecognitionService) {
+      try {
+        speakerRecognitionService.endSession()
+      } catch (e) {
+        console.warn('[Speaker Recognition] Error ending session during force reset:', e)
+      }
+    }
+    pendingTranscriptSpeakerUpdates.clear()
+
     // Unsubscribe from audio chunks (both microphone and system audio)
     if (audioChunkUnsubscribe) {
       audioChunkUnsubscribe()
@@ -1993,6 +2131,16 @@ export const liveTranscriptionService = {
 
 // Export reset function for testing
 export function resetLiveTranscriptionState(): void {
+  // End speaker recognition session if active
+  if (currentState.meetingId && speakerRecognitionService) {
+    try {
+      speakerRecognitionService.endSession()
+    } catch (e) {
+      console.warn('[Speaker Recognition] Error ending session during reset:', e)
+    }
+  }
+  pendingTranscriptSpeakerUpdates.clear()
+
   if (audioChunkUnsubscribe) {
     audioChunkUnsubscribe()
     audioChunkUnsubscribe = null
@@ -2015,6 +2163,9 @@ export function resetLiveTranscriptionState(): void {
   audioChunkBuffer = []
   detectedSampleRate = null
   pythonStartPromiseResolve = null
+
+  // Reset lazily initialized speaker recognition service
+  speakerRecognitionService = null
 
   // Reset audio diagnostics
   resetAudioDiagnostics()
